@@ -4,7 +4,7 @@
 
 ### TiDB 架构
 
-![15f15969c7cd187a99c2c2072db2ad93](/Users/iss/Desktop/15f15969c7cd187a99c2c2072db2ad93.jpg)
+![15f15969c7cd187a99c2c2072db2ad93](../images/15f15969c7cd187a99c2c2072db2ad93.jpg)
 
 TiDB 由分布式SQL层(TiDB)，分布式KV存储引擎(TiKV)以及管理整个集群的PD模块组成。无线水平扩展是TiDB的一大特点。
 
