@@ -31,7 +31,7 @@ TiDB 由分布式SQL层(TiDB)，分布式KV存储引擎(TiKV)以及管理整个�
 
 TiKV 利用 Raft 来做数据复制，每个数据变更都会落地为一条 Raft 日志，通过 Raft 的日志复制功能，将数据安全可靠地同步到 Group 的多数节点中。通过单机的 RocksDB，我们可以将数据快速地存储在磁盘上；通过 Raft，我们可以将数据复制到多台机器上，以防单机失效。数据的写入是通过 Raft 这一层的接口写入，而不是直接写 RocksDB。通过实现 Raft，我们拥有了一个分布式的 KV，现在再也不用担心某台机器挂掉了。
 
-![一致性](/Users/iss/go/src/note/MyLearn/images/v2-66edd7577dcb6b9c8b69a134fa2c89d2_hd.jpg)
+![一致性](../images/v2-66edd7577dcb6b9c8b69a134fa2c89d2_hd.jpg)
 
 ### 4、Region
 
@@ -45,7 +45,7 @@ TiKV 利用 Raft 来做数据复制，每个数据变更都会落地为一条 Ra
 
 TiKV 是以 Region 为单位做数据的复制，也就是一个 Region 的数据会保存多个副本，我们将每一个副本叫做一个 Replica。Replica 之间是通过 Raft 来保持数据的一致（终于提到了 Raft），一个 Region 的多个 Replica 会保存在不同的节点上，构成一个 Raft Group。其中一个 Replica 会作为这个 Group 的 Leader，其他的 Replica 作为 Follower。所有的读和写都是通过 Leader 进行，再由 Leader 复制给 Follower。
 
-![](/Users/iss/go/src/note/MyLearn/images/image.png)
+![](../images/image.png)
 
 ## TiDB的应用场景
 
