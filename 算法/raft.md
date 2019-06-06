@@ -19,3 +19,11 @@
 ## Raft数据一致性策略
 
 Raft协议强烈依赖Leader节点来确保集群数据一致性。Client发送的数据先到达Leader节点，Leader接收到数据后标记uncommitted，随后Leader向Follower复制数据并等待响应，在获得集群中大于N/2个Follower的已成功接收数据完毕的响应后，Leader标记数据状态为Committed，随后向Client发送数据已接收确认，在向Client发出已接收数据后，再向Follower节点发通知表面数据状态为committed。
+
+## 相关概念？
+
+1）Leader Election
+
+- election timeout random 150ms~300ms，the follower becomes candidate after election timeout,and starts a new election term……send vote request to other nodes.
+
+2）Log Replication
