@@ -27,3 +27,8 @@ Raft协议强烈依赖Leader节点来确保集群数据一致性。Client发送�
 - election timeout random 150ms~300ms，the follower becomes candidate after election timeout,and starts a new election term……send vote request to other nodes.
 
 2）Log Replication
+
+Raft是一个一致性协议，提供几个重要的功能：
+1、Leader选举
+2、成员变更
+3、日志复制

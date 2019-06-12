@@ -25,7 +25,7 @@ TiDB 由分布式SQL层(TiDB)，分布式KV存储引擎(TiKV)以及管理整个�
 - HTAP解决方案（Hybrid Transactional analytical processing）
 - 云原生SQL数据库、支持公有云、私有云、混合云，部署，配置，维护简单
 
-核心特性：**水平扩展与高可用**
+核心特性：**水平扩展与高可用、100% OLTP，80%OLAP**
 
 ### 3、一致性
 
@@ -64,3 +64,51 @@ TiDB本身是一个分布式系统，可作为数据仓库使用。当TiDB的SQL
 ### 4、作为其他系统的模块 
 
 TiDB是传统的存储跟计算分离的项目，底层的Key-Value层，可单独作为HBase的Replacement，同时支持跨行事务。TiDB对外提供两个API接口，一个是ACID Transaction的API，用于支持跨行事务；另一个是Raw API，可以做单行的事务，提升了整个的性能，但不提供跨行事务的ACID支持。
+
+**TiDB、TiKV、PD**
+
+TiDB 对每个表分配一个 TableID，每一个索引都会分配一个 IndexID，每一行分配一个 RowID（如果表有整数型的 Primary Key，那么会用 Primary Key 的值当做 RowID），其中 TableID 在整个集群内唯一，IndexID/RowID 在表内唯一，这些 ID 都是 int64 类型
+
+Key-Value存储：
+
+1、这是一个巨大的 Map，也就是存储的是 Key-Value pair
+
+2、这个 Map 中的 Key-Value pair 按照 Key 的二进制顺序有序，也就是我们可以 Seek 到某一个 Key 的位置，然后不断的调用 Next 方法以递增的顺序获取比这个 Key 大的 Key-Value。TiKV把数据保存在RocksDB中，数据落地由RocksDB负责。RocksDB是单机的Key-Value Map。通过优化后的Raft协议，实现高效可靠的本地存储方案。
+
+Raft是一个一致性协议，提供几个重要的功能：
+
+1、Leader选举
+
+2、成员变更
+
+3、日志复制
+
+TiKV利用Raft来做数据复制，每个数据变更都会落地为一条Raft日志，通过Raft复制功能，将数据安全可靠地同步到Group多数节点。通过单机的RocksDB，将数据快速存储在磁盘，通过Raft，数据复制到多台机器，防止单机失效。
+
+**MVCC KEY+版本号**
+
+没有MVCC之前
+
+Key1-->Value
+
+有了MVCC之后：
+
+Key1-Version3 -->Value
+
+Key1-Version2 -->Value 
+
+**定位问题语句**
+
+并不是所有 SLOW_QUERY 的语句都是有问题的。会造成集群整体压力增大的，是那些 process_time 很大的语句。wait_time 很大，但 process_time 很小的语句通常不是问题语句，是因为被问题语句阻塞，在执行队列等待造成的响应时间过长。
+
+**Explain 查看执行计划**
+
+Task 简介
+
+目前 TiDB 的计算任务隶属于两种不同的 task：cop task 和 root task。cop task 是指使用 TiKV 中的 coprocessor 执行的计算任务，root task 是指在 TiDB 中执行的计算任务。
+
+SQL 优化的目标之一是将计算尽可能地下推到 TiKV 中执行。TiKV 中的 coprocessor 能支持大部分 SQL 内建函数（包括聚合函数和标量函数）、SQL LIMIT操作、索引扫描和表扫描。但是，所有的 Join 操作都只能作为 root task 在 TiDB 上执行。
+
+MySQL执行计划返回的是正在执行的查询计划，
+
+TiDB返回的是最后执行的查询计划。
