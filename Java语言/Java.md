@@ -11,6 +11,7 @@
 ![gc图](../images/java-gc.png)
 
 # Java多线程
+线程是JVM执行任务的最小单元
 
 ### 1、JVM中线程的状态
     * New
