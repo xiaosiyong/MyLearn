@@ -112,3 +112,52 @@ SQL 优化的目标之一是将计算尽可能地下推到 TiKV 中执行。TiKV
 MySQL执行计划返回的是正在执行的查询计划，
 
 TiDB返回的是最后执行的查询计划。
+
+
+
+TiKV使用Raft一致性算法保证数据的安全，默认提供三个副本支持，三个副本形成了一个Raft Group。
+
+当Client需要写入某个数据的时候，Client将操作发送给Raft Leader，在TiKV里称为Propose，Leader将操作编码成一个entry，写入到自己的Raft Log里，我们称为Append。Leader通过Raft算法将Entry复制到其他Follower上面，这个我们叫做Replicate。Follower收到Entry之后会进行Append操作，顺带告诉Leader Append成功。当Leader发现这个Entry被大多数节点Append，就认为这个Entry已经是Committed的了，然后就可以将Entry里面的操作解码出来，执行并且应用到状态机里面，这个我们称为Apply。在TiKV里，提供了Lease Read，对于Read请求，直接发给Leader，如果Leader确认自己的lease未过期，直接提供Read服务，这样就不用走一次Raft了。如果发现lease过期了，就会走一次Raft进行续租，再提供Read服务。
+
+因为一个 Raft Group 处理的数据量有限，所以我们会将数据切分成多个 Raft Group，我们叫做 Region。切分的方式是按照 range 进行切分，也就是我们会将数据的 key 按照字节序进行排序，也就是一个无限的 sorted map，然后将其切分成一段一段（连续）的 key range，每个 key range 当成一个 Region。
+
+两个相邻的 Region 之间不允许出现空洞，也就是前面一个 Region 的 end key 就是后一个 Region 的 start key。Region 的 range 使用的是前闭后开的模式  [start, end)，对于 key start 来说，它就属于这个 Region，但对于 end 来说，它其实属于下一个 Region。
+
+## SQL Key Mapping
+
+我们在 TiKV 上面构建了一个分布式数据库 TiDB，它是一个[关系型数据库](https://cloud.tencent.com/product/cdb-overview?from=10680)，所以大家需要关注的是一个关系型的 table 是如何映射到 key-value 上面的。假设我们有如下的表结构：
+
+```js
+CREATE TABLE t1 {
+	id BIGINT PRIMARY KEY,
+	name VARCHAR(1024),
+	age BIGINT,
+	content BLOB,
+	UNIQUE(name),
+	INDEX(age),
+}
+```
+
+上面我们创建了一张表 t1，里面有四个字段，id 是主键，name 是唯一索引，age 是一个索引。那么这个表里面的数据是如何对应到 TiKV 的呢？
+
+在 TiDB 里面，任何一张表都有一个唯一的 ID，譬如这里是 11，任何的索引也有唯一的 ID，上面 name 就是 12，age 就是 13。我们使用前缀 t 和 i 来区分表里面的 data 和 index。对于上面表 t1 来说，假设现在它有两行数据，分别是 (1, “a”, 10, “hello”) 和 (2, “b”, 12, “world”)，在 TiKV 里面，每一行数据会有不同的 key-value 对应。如下：
+
+```js
+PK
+t_11_1 -> (1, “a”, 10, “hello”)
+t_11_2 -> (2, “b”, 12, “world”)
+
+Unique Name
+i_12_a -> 1
+i_12_b -> 2
+
+Index Age
+i_13_10_1 -> nil
+i_13_12_2 -> nil
+```
+
+因为 PK 具有唯一性，所以我们可以用 t + Table ID + PK 来唯一表示一行数据，value 就是这行数据。对于 Unique 来说，也是具有唯一性的，所以我们用 i + Index ID + name 来表示，而 value 则是对应的 PK。如果两个 name 相同，就会破坏唯一性约束。当我们使用 Unique 来查询的时候，会先找到对应的 PK，然后再通过 PK 找到对应的数据。
+
+对于普通的 Index 来说，不需要唯一性约束，所以我们使用 i + Index ID + age + PK，而 value 为空。因为 PK 一定是唯一的，所以两行数据即使 age 一样，也不会冲突。当我们使用 Index 来查询的时候，会先 seek 到第一个大于等于 i + Index ID + age 这个 key 的数据，然后看前缀是否匹配，如果匹配，则解码出对应的 PK，再从 PK 拿到实际的数据。
+
+TiDB 在操作 TiKV 的时候需要保证操作 keys 的一致性，所以需要使用 TxnKV 模式。
