@@ -150,3 +150,153 @@ Actor模型和CSP模型
 
 每次const出现时，都会让iota的值初始化成0。一行中有两个及以上的iota时，在下一行增长，而不是立即取得它的引用，比如 const(A，B = iota+1，iota+2)两个iota的值是一样的
 
+#### CSP（Communicating Sequential Processes）模型与Actor模型
+
+二者的格言都是：
+
+Don't communicate by sharing memory，share memory by communicating.
+
+
+
+#### 获取命令行的参数
+
+- 使用os库，如：
+
+  ```go
+  func main() {
+      args := os.Args
+      if args == nil  { // 校验参数并输出提示信息
+          return
+      }
+      fmt.Printf("%T\n", args) 
+      fmt.Printf("%v\n", args)
+  }
+  ```
+
+go build main.go 
+
+./main -name DomXiao
+
+输出：[]string [./main -name DomXiao]
+
+- 使用flag库，步骤：
+
+  1）定义各个参数的类型、名字、默认值与提示信息
+
+  2）解析
+
+  3）获取参数值
+
+```go
+func main() {
+    name := flag.String("name", "", "Your name")
+    var age int
+    flag.IntVar(&age, "age", -1, "Your age")
+
+    flag.Parse()
+
+    println("name", *name)
+    println("age", age)
+}
+```
+
+
+
+#### defer问题
+
+官方对defer的执行时机做的阐述，分别是：
+
+- 包裹defer的函数返回时
+- 包裹defer的函数执行到末尾时
+- 所在的goroutine发生panic时
+
+当有多个defer时，执行顺序是LIFO。
+
+```go
+func unameReturnValues() int {
+    var result int
+    defer func() {
+        result++
+        fmt.Println("I'm unamed defer~")
+    }()
+    return result
+}
+
+func namedReturnValues() (result int) {
+    defer func() {
+        result++
+        fmt.Println("I'm named defer~")
+    }()
+    return result
+}
+```
+
+上面的方法会输出0，下面的方法输出1。上面的方法使用了匿名返回值，下面的使用了命名返回值，除此之外其他的逻辑均相同，为什么输出的结果会有区别呢？
+
+Defer过程如下:
+
+- 将result赋值给返回值（可以理解成Go自动创建了一个返回值retValue，相当于执行retValue = result）
+- 然后检查是否有defer，如果有则执行
+- 返回刚才创建的返回值（retValue）
+
+在这种情况下，defer中的修改是对result执行的，而不是retValue，所以defer返回的依然是retValue。在命名返回值方法中，由于返回值在方法定义时已经被定义，所以没有创建retValue的过程，result就是retValue，defer对于result的修改也会被直接返回。
+
+**当调用os.Exit()方法退出程序时，defer并不会被执行。**
+
+**Go 中如何判断一个变量的类型？？？**
+
+通过类型断言，如：
+
+~~~go
+s1 := map[int]string{0:"zero",1:"one",2:"two"}
+value,ok := interface{}(s1).(map[int]string)
+fmt.Println(value,ok)
+//输出：map[0:zero 1:one 2:two] true
+~~~
+
+#### 类型转换时值得注意的点
+
+- 对于整数类型值、整数常量之间的类型转换，原则上只要源值在目标类型的可表示范围之内就是合法的。但如果源整数类型的范围比较大，目标类型的范围比较小的时候，会出现截掉高位的二进制数据。比如：
+
+```go
+var srcInt = int16(-255)
+dsInt := int8(srcInt)
+fmt.PrintLn(dsInt)//1
+```
+
+首先你要知道，整数在 Go 语言以及计算机中都是以补码的形式存储的。这主要是为了简化计算机对整数的运算过程。补码其实就是原码各位求反再加 1。比如，int16 类型的值<code>-255</code>的补码是<code>1111111100000001</code>。如果我们把该值转换为<code>int8</code>类型的值，那么 Go 语言会把在较高位置（或者说最左边位置）上的 8 位二进制数直接截掉，从而得到<code>00000001</code>。又由于其最左边一位是0，表示正整数，以及**正整数的补码就等于源码（负数的补码等于源码+1）**，所以值为1。一定要记住，当整数值的类型的有效范围由宽变窄时，只需在补码形式下截掉一定数量的高位二进制数即可。类似的快刀斩乱麻规则还有：当把一个浮点数类型的值转换为整数类型值时，前者的小数部分会被全部截掉。
+
+- <strong>第二，虽然直接把一个整数值转换为一个<code>string</code>类型的值是可行的，但值得关注的是，被转换的整数值应该可以代表一个有效的 Unicode 代码点，否则转换的结果将会是<code>"�"</code>（仅由高亮的问号组成的字符串值）。</strong>
+
+~~~go
+fmt.PrintLn(string(-1))//�
+~~~
+
+![别名、类型再定义与潜在类型](../images/GO语言类型区别.png)
+
+
+
+#### 数组和切片
+
+数组类型的值长度是固定的，而切片类型的值是可变长的。数组的长度在声明的时候就必须给出，并且之后不会改变，而且数组的长度是其类型的一部分。[1]string 与 [2]string是两个不同的数组类型。
+
+![sliceandarray](../images/sliceandarray.png)
+
+
+
+Go语言切片类型属于引用类型，同属于引用类型的还有字典类型、通道类型、函数类型；数组属于值类型，同属于值类型的有基础数据类型及结构体类型。
+
+~~~go
+  slice1 := []int{0,1,2,3,4,5,6}
+	slice2 := slice1[3:6]
+	fmt.Println("slice2 length:",len(slice2),",slice2 cap:",cap(slice2))
+  //输出：slice2 length: 3 ,slice2 cap: 4
+~~~
+
+更通用的规则是：一个切片的容量可以被看作是透过这个窗口最多可以看到的底层数组中元素的个数。S4是通过在S3shang施加切片操作得来的，所以S3d底层数组就是S4的底层数组。在底层数组不变的情况下，切片代表的窗口可以向右扩展，直至其底层数组的末尾。注意，**切片代表的窗口是无法向左扩展的**
+
+Go 语言字典的键类型不可以是**函数类型、字典类型和切片类型**。
+
+#### 通道
+
+通道类型的值是并发安全的，这也是Go语言自带的，唯一一个可以满足并发安全性的类型。声明并初始化通道的时候使用make关键字，第一个参数代表通道的类型、第二个可选参数表示该通道的容量。当容量为0时，也叫非缓冲通道。**一个通道相当于一个先进先出(FIFO)的队列**，通道中格格元素值都是严格地按照发送的顺序排列的，先被发送通道的元素一定会先被接收。
