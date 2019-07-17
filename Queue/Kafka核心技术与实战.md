@@ -101,3 +101,110 @@ Try  {
 
 - read_uncommitted：这是默认值，表明 Consumer 能够读取到 Kafka 写入的任何消息，不论事务型 Producer 提交事务还是终止事务，其写入的消息都可以读取。很显然，如果你用了事务型 Producer，那么对应的 Consumer 就不要使用这个值。
 - read_committed：表明 Consumer 只会读取事务型 Producer 成功提交事务写入的消息。当然了，它也能看到非事务型 Producer 写入的所有消息。
+
+#### 消费者组
+
+Consumer Group是Kafka提供的可扩展且具有容错性的消费者机制。理想情况下，Consumer实例的数量等于该Group订阅主题的分区总数。举个简单的例子，假设一个 Consumer Group 订阅了3个主题，分别是A、B、C，它们的分区数依次是1、2、3，那么通常情况下，为该Group设置6个Consumer实例是比较理想的情形，能最大限度的实现高伸缩性。新版本的Consumer Group将位移保存在Broker端的内部主题中。消费者组可以Rebalance，Rebalace是一种协议，规定了一个Consumer Group下的所有Consumer如何达成一致，来分配订阅Topic的每个分区。比如某个Group下有20个Consumer实例，订阅了一个具有100个分区的Topic，通常情况下每个Consumer分配5个分区。触发Rebalance的条件：
+
+- 组成员数发生变更
+- 订阅主题数发生变更
+- 订阅主题的分区数发生变更
+
+Rebalance 就是让一个 Consumer Group 下所有的 Consumer 实例就如何消费订阅主题的所有分区达成共识的过程。Rebalance过程中，所有Consumer实例共同参与，在协调者组件的帮助下，完成订阅主题分区的分配。在整个过程中，所有实例不能消费消息，对TPS影响很大。所谓协调者，在 Kafka 中对应的术语是 Coordinator，它专门为 Consumer Group 服务，负责为 Group 执行 Rebalance 以及提供位移管理和组成员管理等。Broker启动时，会创建和开启相应的Coordinator组件。也就是说，所有Broker都有各自的Coordinator组件。目前确定Coordinator所在Broker的算法有两步：
+
+1）确定由位移主题的哪个分区来保存该Group数据：partitionId=Math.abs(groupId.hashCode() % offsetsTopicPartitionCount)。
+
+2）找出该分区 Leader 副本所在的 Broker，该 Broker 即为对应的 Coordinator。
+
+#### 避免不必要的Rebalance
+
+1）未能及时发送心跳，导致Consumer被"踢出"Group引发。推荐值：**session.timeout.ms>=3*heartbeat.interval.ms.**
+
+2）Consumer消费时间过长。**max.poll.interval.ms**设置得大一点。
+
+
+
+Consumer的位移数据作为一条条普通的Kafka消息，提交到__consumer_offsets中，用__consumer_offsets的主要作用是保存kafka消费者的位移信息。位移主题的Key中保留了3部分内容：**<Group ID,主题名，分区号>**。当Kafka急群众的第一个Consumer程序启动时，Kafka会自动创建位移主题。**如果位移主题是Kafka自动创建的，那么该主题的分区数是50，副本数是3。**
+
+#### 自动提交位移和手动提交位移
+
+Consumer端有个参数叫enable.auto.commit,如果为true，Consumer后台默默的定期提交位移，提交间隔由一个专属的参数auto.commit.interval.ms来控制。自动提交位移时存在的问题，只要Consumer一直启动着，就会无限期的向位移主题写入消息。我们来举个极端一点的例子。假设 Consumer 当前消费到了某个主题的最新一条消息，位移是 100，之后该主题没有任何新消息产生，故 Consumer 无消息可消费了，所以位移永远保持在 100。由于是自动提交位移，位移主题中会不停地写入位移 =100 的消息。显然 Kafka 只需要保留这类消息中的最新一条就可以了，之前的消息都是可以删除的。这就要求 Kafka 必须要有针对位移主题消息特点的消息删除策略，否则这种消息会越来越多，最终撑爆整个磁盘。
+
+Kafka使用**Compact策略**来删除位移主题中的过期消息，避免该主题无限期膨胀。对于同一个Key的两条消息M1和M2，如果M1的发送时间早于M2，那么M1就是过期消息。Compact的过程就是扫描日志的所有消息，剔除过期的消息，把剩下的整理在一起。如图：
+
+![compact](../images/compact.jpeg)
+
+图中位移为0、2和3的消息的Key都是K1。Compact之后，分区只需要保存位移为3的消息就行。**Kafka提供了专门的后台线程 Log Cleaner，定期巡检待Compact的主题，看看是否存在可以删除的数据**。
+
+#### Consumer消费位移
+
+记录了要消费的下一条消息的位移，是下一条，而不是目前最新消费消息的位移。**Consumer向Kafka汇报自己位移数据的过程叫提交位移**。因为Consumer能同时消费多个分区的数据，所以位移的提交实际上是在分区粒度上进行的，即**Consumer需要为分配给它的每个分区提交各自的位移数据**。
+
+从用户角度，有手动提交和自动提交，从Consumer端的角度，分为同步提交和异步提交。
+
+自动提交：一旦设置了 enable.auto.commit 为 true，Kafka 会保证在开始调用 poll 方法时，提交上次 poll 返回的所有消息。从顺序上来说，poll 方法的逻辑是先提交上一批消息的位移，再处理下一批消息，因此它能保证不出现消费丢失的情况。但自动提交位移的一个问题在于，<strong>它可能会出现重复消费</strong>。在默认情况下，Consumer 每 5 秒自动提交一次位移。现在，我们假设提交位移之后的 3 秒发生了 Rebalance 操作。在 Rebalance 之后，所有 Consumer 从上一次提交的位移处继续消费，但该位移已经是 3 秒前的位移数据了，故在 Rebalance 发生前 3 秒消费的所有数据都要重新再消费一次。虽然你能够通过减少 auto.commit.interval.ms 的值来提高提交频率，但这么做只能缩小重复消费的时间窗口，不可能完全消除它。这是自动提交机制的一个缺陷。
+
+手动提交：commitSync()，被调用时，Consumer处于阻塞状态，直至远端的Broker返回结果，这个状态才结束，这样会导致系统的瓶颈。如果拉长提交间隔，下次Consumer重启后，会有更多的消息被重新消费。KafkaConsumer#commitAsync()  异步提交。异步提交的问题是出现问题时不会自动重试。因为是异步操作，如果提交失败后自动重试，重试时提交的位移值可能已经"过期"，因此重试没有意义。显然，如果是手动提交，我们需要将 commitSync 和 commitAsync 组合使用才能到达最理想的效果，原因有两个：
+
+- 我们可以利用 commitSync 的自动重试来规避那些瞬时错误，比如网络的瞬时抖动，Broker 端 GC 等。因为这些问题都是短暂的，自动重试通常都会成功，因此，我们不想自己重试，而是希望 Kafka Consumer 帮我们做这件事。
+- 我们不希望程序总处于阻塞状态，影响 TPS。
+
+~~~java
+   try {
+           while(true) {
+                        ConsumerRecords<String, String> records = 
+                                    consumer.poll(Duration.ofSeconds(1));
+                        process(records); // 处理消息
+                        commitAysnc(); // 使用异步提交规避阻塞
+            }
+} catch(Exception e) {
+            handle(e); // 处理异常
+} finally {
+            try {
+                        consumer.commitSync(); // 最后一次提交使用同步阻塞式提交
+	} finally {
+	     consumer.close();
+}
+}
+
+
+//分批提交位移
+private Map<TopicPartition, OffsetAndMetadata> offsets = new HashMap<>();
+int count = 0;
+……
+while (true) {
+            ConsumerRecords<String, String> records = 
+	consumer.poll(Duration.ofSeconds(1));
+            for (ConsumerRecord<String, String> record: records) {
+                        process(record);  // 处理消息
+                        offsets.put(new TopicPartition(record.topic(), record.partition()),
+                                   new OffsetAndMetadata(record.offset() + 1)；
+                       if（count % 100 == 0）
+                                    consumer.commitAsync(offsets, null); // 回调处理逻辑是 null
+                        count++;
+	}
+}
+
+~~~
+
+位移提交：
+
+![suboffset](../images/suboffset.jpeg)
+
+#### CommitFailedException
+
+所谓 CommitFailedException，顾名思义就是 Consumer 客户端在提交位移时出现了错误或异常，而且还是那种不可恢复的严重异常。从源代码方面来说，CommitFailedException 异常通常发生在手动提交位移时，即用户显式调用 KafkaConsumer.commitSync() 方法时。从使用场景来说，有两种典型的场景可能遭遇该异常。
+
+第一种：当消息处理的总时间超过预设的 max.poll.interval.ms 参数值时，Kafka Consumer 端会抛出 CommitFailedException 异常。这是该异常最“正宗”的登场方式。你只需要写一个 Consumer 程序，使用 KafkaConsumer.subscribe 方法随意订阅一个主题，之后设置 Consumer 端参数 max.poll.interval.ms=5 秒，最后在循环调用 KafkaConsumer.poll 方法之间，插入 Thread.sleep(6000) 和手动提交位移，就可以成功复现这个异常了。防止出现这种异常，可以尝试以下操作：
+
+- 缩短单条消息处理的时间，比如，之前下游系统消费一条消息的时间是 100 毫秒，优化之后成功地下降到 50 毫秒，那么此时 Consumer 端的 TPS 就提升了一倍。
+- 增加 Consumer 端允许下游系统消费一批消息的最大时长。
+- 减少下游系统一次性消费的消息总数。。这取决于 Consumer 端参数 max.poll.records 的值。当前该参数的默认值是 500 条，表明调用一次 KafkaConsumer.poll 方法，最多返回 500 条消息。可以说，该参数规定了单次 poll 方法能够返回的消息总数的上限。如果前两种方法对你都不适用的话，降低此参数值是避免 CommitFailedException 异常最简单的手段。
+- 下游系统使用多线程来加速消费
+
+首先，你需要弄清楚你的下游系统消费每条消息的平均延时是多少。比如你的消费逻辑是从 Kafka 获取到消息后写入到下游的 MongoDB 中，假设访问 MongoDB 的平均延时不超过 2 秒，那么你可以认为消息处理需要花费 2 秒的时间。如果按照 max.poll.records 等于 500 来计算，一批消息的总消费时长大约是 1000 秒，因此你的 Consumer 端的 max.poll.interval.ms 参数值就不能低于 1000 秒。如果你使用默认配置，那默认值 5 分钟显然是不够的，你将有很大概率遭遇 CommitFailedException 异常。将 max.poll.interval.ms 增加到 1000 秒以上的做法就属于上面的第 2 种方法。除了调整 max.poll.interval.ms 之外，你还可以选择调整 max.poll.records 值，减少每次 poll 方法返回的消息数。还拿刚才的例子来说，你可以设置 max.poll.records 值为 150，甚至更少，这样每批消息的总消费时长不会超过 300 秒（150*2=300），即 max.poll.interval.ms 的默认值 5 分钟。这种减少 max.poll.records 值的做法就属于上面提到的方法 3。
+
+第二种不太常见的场景
+
+Kafka Java Consumer 端还提供了一个名为 Standalone Consumer 的独立消费者。它没有消费者组的概念，每个消费者实例都是独立工作的，彼此之间毫无联系。不过，你需要注意的是，独立消费者的位移提交机制和消费者组是一样的，因此独立消费者的位移提交也必须遵守之前说的那些规定，比如独立消费者也要指定 group.id 参数才能提交位移。你可能会觉得奇怪，既然是独立消费者，为什么还要指定 group.id 呢？没办法，谁让社区就是这么设计的呢？总之，消费者组和独立消费者在使用之前都要指定 group.id。如果你的应用中同时出现了设置相同 group.id 值的消费者组程序和独立消费者程序，那么当独立消费者程序手动提交位移时，Kafka 就会立即抛出 CommitFailedException 异常，因为 Kafka 无法识别这个具有相同 group.id 的消费者实例，于是就向它返回一个错误，表明它不是消费者组内合法的成员。
+
