@@ -122,8 +122,6 @@ Rebalance 就是让一个 Consumer Group 下所有的 Consumer 实例就如何�
 
 2）Consumer消费时间过长。**max.poll.interval.ms**设置得大一点。
 
-
-
 Consumer的位移数据作为一条条普通的Kafka消息，提交到__consumer_offsets中，用__consumer_offsets的主要作用是保存kafka消费者的位移信息。位移主题的Key中保留了3部分内容：**<Group ID,主题名，分区号>**。当Kafka急群众的第一个Consumer程序启动时，Kafka会自动创建位移主题。**如果位移主题是Kafka自动创建的，那么该主题的分区数是50，副本数是3。**
 
 #### 自动提交位移和手动提交位移
