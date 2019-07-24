@@ -272,7 +272,7 @@ fmt.PrintLn(dsInt)//1
 fmt.PrintLn(string(-1))//�
 ~~~
 
-![别名、类型再定义与潜在类型](../images/GO语言类型区别.png)
+![别名、类型再定义与潜在类型](../images/gotype.png)
 
 
 
@@ -486,4 +486,12 @@ once.Do(fn(){})//只执行一次
 ~~~
 
 Do会在函数结束调用之前，在defer语句里，把字段done通过原子操作置为1。
+
+#### Sync.Map
+
+并发安全字典对键的类型要是不能为函数类型、字典类型和切片类型。如何做到检查Key和Value的类型呢？有两种方法：使用类型断言表达式或者反射操作
+
+1）让并发安全字典只能存储某个特定类型的键，Load，Store，等操作都只能Key的类型。利用Go语言编译器去做类型检查。
+
+2）封装struct，除了sync.Map之外，再封装keyType和valueType 都为reflect.Type，虽然灵活，但是反射或多或少会降低性能。
 
