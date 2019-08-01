@@ -206,3 +206,162 @@ while (true) {
 
 Kafka Java Consumer 端还提供了一个名为 Standalone Consumer 的独立消费者。它没有消费者组的概念，每个消费者实例都是独立工作的，彼此之间毫无联系。不过，你需要注意的是，独立消费者的位移提交机制和消费者组是一样的，因此独立消费者的位移提交也必须遵守之前说的那些规定，比如独立消费者也要指定 group.id 参数才能提交位移。你可能会觉得奇怪，既然是独立消费者，为什么还要指定 group.id 呢？没办法，谁让社区就是这么设计的呢？总之，消费者组和独立消费者在使用之前都要指定 group.id。如果你的应用中同时出现了设置相同 group.id 值的消费者组程序和独立消费者程序，那么当独立消费者程序手动提交位移时，Kafka 就会立即抛出 CommitFailedException 异常，因为 Kafka 无法识别这个具有相同 group.id 的消费者实例，于是就向它返回一个错误，表明它不是消费者组内合法的成员。
 
+#### 多线程开发消费者
+
+1、消费者程序启动多个线程，每个线程维护专属的KafkaConsumer实例，负责完整的消息获取、处理流程，如下图所示：
+
+![multiplec1](../images/multiplec1.png)
+
+2、消费者程序使用单或多线程获取消息，同时创建多个消费线程执行消息处理逻辑。获取消息的线程可以是一个，也可是多个，每个线程维护专属的KafkaConsumer实例，处理消息则交由特定的线程池来做。如下图：
+
+![multiplec2](../images/multiplec2.png)
+
+优缺点对比：
+
+![solutioncompare](../images/solutioncompare.jpeg)
+
+#### Kafka消费者TCP连接
+
+Kafka网络传输是基于TCP协议的，而不是UDP协议。和生产者不同的是，构建KafkaConsumer实例时不会创建任何TCP连接。当执行完new KafkaConsumer(properties)后并没有socket连接被创建出来。这一点与Java生产者有区别，生产者入口类KafkaProducer在构建实例的时候，会在后台默默启动一个Sender线程，负责Socket连接的创建。**TCP连接是在调用KafkaConsumer.poll方法时创建的**，poll方法内部有3个时机可以创建TCP连接。
+
+1、发起FindCoordinator请求时
+
+消费者端的协调者(Coordinator)会驻留在Broker端的内存中，负责消费者组的成员管理和各个消费者的位移提交管理。当消费者程序首次启动调用Poll方法时，需要向kafka集群发送一个名为FindCoordinator的请求，希望kafka集群告诉它哪个broker是管理它的协调者。理论上消费者可以向任意broker发送请求，但实际上，消费者程序会向集群中当前负载最小的那台broker发请求，如何评估负载呢？看待消费者连接的所有broker中，谁的待发送请求最少。
+
+2、连接协调者时
+
+Broker 处理完上一步发送的 FindCoordinator 请求之后，会返还对应的响应结果（Response），显式地告诉消费者哪个 Broker 是真正的协调者，因此在这一步，消费者知晓了真正的协调者后，会创建连向该 Broker 的 Socket 连接。只有成功连入协调者，协调者才能开启正常的组协调操作，比如加入组、等待组分配方案、心跳请求处理、位移获取、位移提交等。
+
+3、消费数据时
+
+消费者会为每个要消费的分区创建与该分区领导者副本所在 Broker 连接的 TCP。举个例子，假设消费者要消费 5 个分区的数据，这 5 个分区各自的领导者副本分布在 4 台 Broker 上，那么该消费者在消费时会创建与这 4 台 Broker 的 Socket 连接。
+
+消费者程序会创建3类TCP连接：**1、确定协调者和获取集群元数据 2、连接协调者、令其执行组成员管理操作 3、执行实际的消息获取**，当第三类连接成功创建后，消费者程序就会放弃第一类TCP连接。
+
+#### TCP连接的关闭
+
+主动关闭和kafka自动关闭，主动是指**手动调用KafkaConsumer.close()或者执行kill**，kafka自动关闭是由**消费者端参数connection.max.idle.ms**控制的，默认9分钟。
+
+### 消费者组监控进度
+
+1、Kafka自带命令**kafka-consumer-groups 脚本是 Kafka 为我们提供的最直接的监控消费者消费进度的工具**
+
+使用方法：
+
+**$ bin/kafka-consumer-groups.sh --bootstrap-server <Kafka broker 连接信息 > --describe --group <group 名称 >**
+
+![kafkamonitor](../images/kafkamonitor.png)
+
+当出现Consumer group '' has no active members时，是因为我们运行 kafka-consumer-groups 脚本时没有启动消费者程序。它显式地告诉我们，当前消费者组没有任何 active 成员，即没有启动任何消费者实例。虽然这些列没有值，但 LAG 列依然是有效的，它依然能够正确地计算出此消费者组的 Lag 值。
+
+2、Kafka Java Consumer API 
+
+简单来说，社区提供的 Java Consumer API 分别提供了查询当前分区最新消息位移和消费者组最新消费消息位移两组方法，我们使用它们就能计算出对应的 Lag。
+
+~~~java
+public static Map<TopicPartition, Long> lagOf(String groupID, String bootstrapServers) throws TimeoutException {
+        Properties props = new Properties();
+        props.put(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        try (AdminClient client = AdminClient.create(props)) {
+            ListConsumerGroupOffsetsResult result = client.listConsumerGroupOffsets(groupID);
+            try {
+                Map<TopicPartition, OffsetAndMetadata> consumedOffsets = result.partitionsToOffsetAndMetadata().get(10, TimeUnit.SECONDS);
+                props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false); // 禁止自动提交位移
+                props.put(ConsumerConfig.GROUP_ID_CONFIG, groupID);
+                props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+                props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+                try (final KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props)) {
+                    Map<TopicPartition, Long> endOffsets = consumer.endOffsets(consumedOffsets.keySet());
+                    return endOffsets.entrySet().stream().collect(Collectors.toMap(entry -> entry.getKey(),
+                            entry -> entry.getValue() - consumedOffsets.get(entry.getKey()).offset()));
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                // 处理中断异常
+                // ...
+                return Collections.emptyMap();
+            } catch (ExecutionException e) {
+                // 处理 ExecutionException
+                // ...
+                return Collections.emptyMap();
+            } catch (TimeoutException e) {
+                throw new TimeoutException("Timed out when getting lag for consumer group " + groupID);
+            }
+        }
+    }
+
+~~~
+
+3、Kafka JMX监控指标
+
+当前，Kafka 消费者提供了一个名为 kafka.consumer:type=consumer-fetch-manager-metrics,client-id=“{client-id}”的 JMX 指标，里面有很多属性。和我们今天所讲内容相关的有两组属性：records-lag-max 和 records-lead-min，它们分别表示此消费者在测试窗口时间内曾经达到的最大的 Lag 值和最小的 Lead 值。这里的 Lead 值是指消费者最新消费消息的位移与分区当前第一条消息位移的差值，Lag 越大的话，Lead 就越小，反之也是同理。**一旦你监测到 Lead 越来越小，甚至是快接近于 0 了，你就一定要小心了，这可能预示着消费者端要丢消息了**
+
+#### kafka副本机制
+
+副本的好处：1、提供数据冗余 2、提供高伸缩性 3、改善数据局部性。但是Apache Kafka智能享受到副本带来的第一个好处，也就是提供数据冗余实现高可用性和高持久性。
+
+kafka有主题的概念，每个主题进一步划分成若干个分区，副本的概念实际是在分区层级下定义的，每个分区配置有若干个副本。**所谓副本（Replica），本质就是一个只能追加写消息的提交日志**。。根据 Kafka 副本机制的定义，同一个分区下的所有副本保存有相同的消息序列，这些副本分散保存在不同的 Broker 上，从而能够对抗部分 Broker 宕机带来的数据不可用。在实际生产环境中，每台 Broker 都可能保存有各个主题下不同分区的不同副本，因此，单个 Broker 上存有成百上千个副本的现象是非常正常的。如图：
+
+![kafkareplica](../images/kafkareplica.png)
+
+如何保证数据的一致性呢？答案是**基于领导者(Leader-based)的副本机制**，如图：
+
+![leaderbased](../images/leaderbased.png)
+
+第一，在 Kafka 中，副本分成两类：领导者副本（Leader Replica）和追随者副本（Follower Replica）。每个分区在创建时都要选举一个副本，称为领导者副本，其余的副本自动称为追随者副本。第二，Kafka 的副本机制比其他分布式系统要更严格一些。在 Kafka 中，追随者副本是不对外提供服务的。这就是说，任何一个追随者副本都不能响应消费者和生产者的读写请求。所有的请求都必须由领导者副本来处理，或者说，所有的读写请求都必须发往领导者副本所在的 Broker，由该 Broker 负责处理。追随者副本不处理客户端请求，它唯一的任务就是从领导者副本<strong>异步拉取</strong>消息，并写入到自己的提交日志中，从而实现与领导者副本的同步。第三，当领导者副本挂掉了，或者说领导者副本所在的 Broker 宕机时，Kafka 依托于 ZooKeeper 提供的监控功能能够实时感知到，并立即开启新一轮的领导者选举，从追随者副本中选一个作为新的领导者。老 Leader 副本重启回来后，只能作为追随者副本加入到集群中。**追随者副本是不对外提供服务的**。对于客户端用户而言，Kafka 的追随者副本没有任何作用，它既不能像 MySQL 那样帮助领导者副本“抗读”，也不能实现将某些副本放到离客户端近的地方来改善数据局部性。
+
+为什么这么设计呢？
+
+1、<strong>方便实现“Read-your-writes”</strong>，所谓 Read-your-writes，顾名思义就是，当你使用生产者 API 向 Kafka 成功写入消息后，马上使用消费者 API 去读取刚才生产的消息。
+
+2、**方便实现单调读（Monotonic Reads）**，什么是单调读呢？就是对于一个消费者用户而言，在多次消费消息时，它不会看到某条消息一会儿存在一会儿不存在。
+
+**In-sync Replicas（ISR）**
+
+我们刚刚反复说过，追随者副本不提供服务，只是定期地异步拉取领导者副本中的数据而已。既然是异步的，就存在着不可能与 Leader 实时同步的风险。在探讨如何正确应对这种风险之前，我们必须要精确地知道同步的含义是什么。或者说，Kafka 要明确地告诉我们，追随者副本到底在什么条件下才算与 Leader 同步。基于这个想法，Kafka 引入了 In-sync Replicas，也就是所谓的 ISR 副本集合。ISR 中的副本都是与 Leader 同步的副本，相反，不在 ISR 中的追随者副本就被认为是与 Leader 不同步的。那么，到底什么副本能够进入到 ISR 中呢？我们首先要明确的是，Leader 副本天然就在 ISR 中。也就是说，<strong>ISR 不只是追随者副本集合，它必然包括 Leader 副本。甚至在某些情况下，ISR 只有 Leader 这一个副本</strong>。我们看下图：
+
+![kafkaleader](../images/kafkaleader.png)
+
+图中有 3 个副本：1 个领导者副本和 2 个追随者副本。Leader 副本当前写入了 10 条消息，Follower1 副本同步了其中的 6 条消息，而 Follower2 副本只同步了其中的 3 条消息。现在，请你思考一下，对于这 2 个追随者副本，你觉得哪个追随者副本与 Leader 不同步？事实上，这张图中的 2 个 Follower 副本都有可能与 Leader 不同步，但也都有可能与 Leader 同步。也就是说，Kafka 判断 Follower 是否与 Leader 同步的标准，不是看相差的消息数，而是另有“玄机”。<strong>这个标准就是 Broker 端参数 replica.lag.time.max.ms 参数值</strong>。。这个参数的含义是 Follower 副本能够落后 Leader 副本的最长时间间隔，当前默认值是 10 秒。这就是说，只要一个 Follower 副本落后 Leader 副本的时间不连续超过 10 秒，那么 Kafka 就认为该 Follower 副本与 Leader 是同步的，即使此时 Follower 副本中保存的消息明显少于 Leader 副本中的消息。我们在前面说过，Follower 副本唯一的工作就是不断地从 Leader 副本拉取消息，然后写入到自己的提交日志中。如果这个同步过程的速度持续慢于 Leader 副本的消息写入速度，那么在 replica.lag.time.max.ms 时间后，此 Follower 副本就会被认为是与 Leader 副本不同步的，因此不能再放入 ISR 中。此时，Kafka 会自动收缩 ISR 集合，将该副本“踢出”ISR。值得注意的是，倘若该副本后面慢慢地追上了 Leader 的进度，那么它是能够重新被加回 ISR 的。这也表明，ISR 是一个动态调整的集合，而非静态不变的。
+
+**Unclean 领导者选举（Unclean Leader Election）**
+
+既然 ISR 是可以动态调整的，那么自然就可以出现这样的情形：ISR 为空。因为 Leader 副本天然就在 ISR 中，如果 ISR 为空了，就说明 Leader 副本也“挂掉”了，Kafka 需要重新选举一个新的 Leader。可是 ISR 是空，此时该怎么选举新 Leader 呢？<strong>Kafka 把所有不在 ISR 中的存活副本都称为非同步副本</strong>。通常来说，非同步副本落后 Leader 太多，因此，如果选择这些副本作为新 Leader，就可能出现数据的丢失。毕竟，这些副本中保存的消息远远落后于老 Leader 中的消息。在 Kafka 中，选举这种副本的过程称为 Unclean 领导者选举。<strong>Broker 端参数 unclean.leader.election.enable 控制是否允许 Unclean 领导者选举</strong>。开启 Unclean 领导者选举可能会造成数据丢失，但好处是，它使得分区 Leader 副本一直存在，不至于停止对外提供服务，因此提升了高可用性。反之，禁止 Unclean 领导者选举的好处在于维护了数据的一致性，避免了消息丢失，但牺牲了高可用性。
+
+#### Kafka是如何处理请求的？
+
+**Reactor模式**，Reactor 模式是事件驱动架构的一种实现方式，特别适合应用于处理多个客户端并发向服务器端发送请求的场景。reactor模式架构如图：
+
+![reactor](../images/reactor.png)
+
+从这张图中，我们可以发现，多个客户端会发送请求给到 Reactor。Reactor 有个请求分发线程 Dispatcher，也就是图中的 Acceptor，它会将不同的请求下发到多个工作线程中处理。在这个架构中，Acceptor 线程只是用于请求分发，不涉及具体的逻辑处理，非常得轻量级，因此有很高的吞吐量表现。而这些工作线程可以根据实际业务处理需要任意增减，从而动态调节系统负载能力。kafka类似的图：
+
+![kafkaart](../images/kafkaart.png)
+
+显然，这两张图长得差不多。Kafka 的 Broker 端有个 SocketServer 组件，类似于 Reactor 模式中的 Dispatcher，它也有对应的 Acceptor 线程和一个工作线程池，只不过在 Kafka 中，这个工作线程池有个专属的名字，叫网络线程池。Kafka 提供了 Broker 端参数 num.network.threads，用于调整该网络线程池的线程数。其<strong>默认值是 3，表示每台 Broker 启动时会创建 3 个网络线程，专门处理客户端发送的请求</strong>。Acceptor线程采用轮训的方式将入站请求公平地发到所有网络线程中。网络线程接收到请求后，处理流程如图：
+
+![brokerhandle](../images/brokerhandle.png)
+
+网络线程拿到请求后，将请求放入共享请求队列。Broker端还有个IO线程池，负责从该队列取出请求，执行真正的处理逻辑。如果是PRODUCE生产请求，则将消息写入底层的磁盘日志，如果是FETCH请求，从磁盘或者页缓存中读取消息。IO 线程池处中的线程才是执行请求逻辑的线程。Broker 端参数<strong>num.io.threads</strong>控制了这个线程池中的线程数。<strong>目前该参数默认值是 8，表示每台 Broker 启动后自动创建 8 个 IO 线程处理请求</strong>。你可以根据实际硬件条件设置此线程池的个数。IO线程处理完请求后，会将生成的响应发送到网络线程池的响应队列，然后由对应的万那个罗线程将Response返还给客户端。<strong>请求队列是所有网络线程共享的，而响应队列则是每个网络线程专属的</strong>。这么设计的原因就在于，Dispatcher 只是用于请求分发而不负责响应回传，因此只能让每个网络线程自己发送 Response 给客户端，所以这些 Response 也就没必要放在一个公共的地方。
+
+上图中有一个叫 Purgatory 的组件，这是 Kafka 中著名的“炼狱”组件。它是用来<strong>缓存延时请求</strong>（Delayed Request）的。<strong>所谓延时请求，就是那些一时未满足条件不能立刻处理的请求</strong>。比如设置了 acks=all 的 PRODUCE 请求，一旦设置了 acks=all，那么该请求就必须等待 ISR 中所有副本都接收了消息后才能返回，此时处理该请求的 IO 线程就必须等待其他 Broker 的写入结果。当请求不能立刻处理时，它就会暂存在 Purgatory 中。稍后一旦满足了完成条件，IO 线程会继续处理该请求，并将 Response 放入对应网络线程的响应队列中。**Kafka的数据类请求和控制类请求是分离的。**
+
+#### 消费者组重平衡流程
+
+触发的条件：1、组成员数量发生变化 2、订阅主题数发生变化 3、订阅主题的分区数发生变化。**重平衡过程是如何通知到其他消费者的呢？**—消费者端的心跳线程
+
+Kafka Java消费者定期的发送心跳请求到Broker端的协调者，0.10.1.0版本之前，发送心跳是在消费者主线程完成的，就是写代码调用KafkaConsumer.poll方法的那个线程，消息处理的逻辑也在这个线程中完成，这样会存在很大的问题，0.10.1.0之后，引入了单独的心跳线程专门执行心跳请求，来规避消息处理时间过长导致心跳无法及时发送的问题。当协调者决定开启新一轮重平衡后，会将**REBANLANCE_IN_PROGRESS**封装进心跳请求的响应中，发还给消费者实例。**重平衡的通知机制正是通过心跳线程来完成的。**消费者端参数 heartbeat.interval.ms 的真实用途，从字面上看，它就是设置了心跳的间隔时间，但这个参数的真正作用是控制重平衡通知的频率。如果你想要消费者实例更迅速地得到通知，那么就可以给这个参数设置一个非常小的值，这样消费者就能更快地感知到重平衡已经开启了。
+
+#### 消费者组状态机
+
+为了完成真个重平衡流程，Kafka设计了一组包含了五个状态的状态机。分别是：Empty，Dead，PreparingRebalance，CompletingRebalance和Stable。各自状态的含义如图：
+
+![kafkastate](../images/kafkastate.jpeg)
+
+状态之间的流转：
+
+![statetransfer](../images/statetransfer.png)
+
+一个消费者组最初是Empty状态，当重平衡过程开启后，会被置于PreparingRebalance状态等待成员加入，之后变成CompletingRebalance状态等待分配方案，最后扭转成Stable状态完成重平衡。当有新成员加入或退出时，状态从Stable变成PreparingRebalance，此时，所有成员必须重新申请加入组。当所有成员退出后，状态变为Empty。Kafka定期自动删除过期位移的条件就是，组处于Empty状态。如果消费者组停掉了很长时间(超过7天)，Kafka很可能把该组的位移数据删除了。日志中会输出：Removed ✘✘✘ expired offsets in ✘✘✘ milliseconds.这是Kafka在尝试定期删除过期位移。
+
+在消费者端，重平衡分两个步骤：加入组和等待领导者消费者(Leader Consumer)分配方案，对应的请求是**JoinGroup请求和SyncGroup请求**
