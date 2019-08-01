@@ -299,5 +299,9 @@ func generateGS(searchBytes []byte, suffix []int, prefix []bool){
 
 ![backm](../images/backm.jpg)
 
+#### 字符串匹配KMP算法
+
+
+
 
 
