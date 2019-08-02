@@ -365,3 +365,52 @@ Kafka Java消费者定期的发送心跳请求到Broker端的协调者，0.10.1.
 一个消费者组最初是Empty状态，当重平衡过程开启后，会被置于PreparingRebalance状态等待成员加入，之后变成CompletingRebalance状态等待分配方案，最后扭转成Stable状态完成重平衡。当有新成员加入或退出时，状态从Stable变成PreparingRebalance，此时，所有成员必须重新申请加入组。当所有成员退出后，状态变为Empty。Kafka定期自动删除过期位移的条件就是，组处于Empty状态。如果消费者组停掉了很长时间(超过7天)，Kafka很可能把该组的位移数据删除了。日志中会输出：Removed ✘✘✘ expired offsets in ✘✘✘ milliseconds.这是Kafka在尝试定期删除过期位移。
 
 在消费者端，重平衡分两个步骤：加入组和等待领导者消费者(Leader Consumer)分配方案，对应的请求是**JoinGroup请求和SyncGroup请求**
+
+组内成员加入组时，会向协调者发送JoinGroup请求。请求中，每个成员都将自己订阅的主题上报，这样协调者就能获取到所有成员的订阅消息。待收集了全部成员的JoinGroup请求后，协调者会选一个担任这个消费者组的领导者，通常是第一个发送JoinGroup请求的成员自动成为领导者。选出领导者后，协调者会把消费者订阅消息封装进JoinGroup请求的响应体中，然后发给领导者，由领导者统一做出分配方案后，进入下一步：发送SyncGroup请求。
+
+在这一步中，领导者向协调者发送SyncGroup请求，将刚做出的分配方案发给协调者。同时，其他成员也会向协调者发送SyncGroup请求，只是请求体中并没有实际内容。这一步的主要目的是让协调者接收分配方案，然后统一以SyncGroup响应的方式分发给所有成员，这样组内成员就知道自己该消费哪些分区了。
+
+JoinGroup请求过程：JoinGroup 请求的主要作用是将组成员订阅信息发送给领导者消费者，待领导者制定好分配方案后，重平衡流程进入到 SyncGroup 请求阶段。
+
+![joingroup](../images/joingroup.png)
+
+SyncGroup请求处理流程：SyncGroup 请求的主要目的，就是让协调者把领导者制定的分配方案下发给各个组内成员。当所有成员都成功接收到分配方案后，消费者组进入到 Stable 状态，即开始正常的消费工作。
+
+![syncgroup](../images/syncgroup.png)
+
+#### Broker端重平衡
+
+1、新成员入组：当组处于Stable状态后，有新成员加入。当协调者收到新的JoinGroup请求后，会通过心跳请求响应的方式通知组内现有的所有成员，强制开启新一轮的重平衡。时序图如下：
+
+![newjoin](../images/newjoin.png)
+
+2、组成员主动离组：消费者实例所在线程或进程调用close()方法主动通知协调者它要退出。这个场景会有第三类请求：**LeaveGroup请求**。协调者收到LeaveGroup后，依然以心跳响应的方式通知其他成员。时序图如下：
+
+![memberleave](../images/memberleave.png)
+
+3、组成员崩溃离组：消费者实例出现严重故障，突然宕机导致的离组。因为崩溃离组是被动的，所以协调者通常需要等待一段时间才能感知到，这段时间由消费者端参数session.timeout.ms控制。时序图如下：
+
+![downleave](../images/downleave.png)
+
+4、重平衡时协调者对组内成员提交位移的处理
+
+正常情况，每个组内成员都会定期汇报位移给协调者。当重平衡开启时，协调者会给予成员一段缓冲时间，要求每个成员必须在这段时间内快速地上报自己的位移信息，然后再开启正常的JoinGroup与SyncGroup请求，时序如图。
+
+![commitoffset](../images/commitoffset.png)
+
+
+
+
+
+#### Kafka命令行集合：
+
+查看消费者组消费情况：     bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group test_order_to_es_groupId0
+
+创建topic：bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic test
+
+查看topiclist：bin``/kafka-topics``.sh --list --bootstrap-server localhost:9092
+
+给某个topic发消息：bin``/kafka-console-producer``.sh --broker-list localhost:9092 --topic ``test
+
+开启消费者：bin``/kafka-console-consumer``.sh --bootstrap-server localhost:9092 --topic ``test` `--from-beginning
+
