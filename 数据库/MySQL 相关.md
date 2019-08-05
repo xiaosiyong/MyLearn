@@ -1,4 +1,14 @@
 ### MySQL 相关
+MySQL架构图：
+
+![mysqlarc](../images/mysqlarc.png)
+
+MySQL 可以分为Server层和存储层两部分。Server层包括连接器、查询分析、分析器、优化器、执行器等，涵盖MySQL的大多数核心服务功能，以及所有的内置函数(日期、时间、数学函数和加密函数)，所有跨存储引擎的功能都在这一层实现，比如存储过程、触发器、视图等。而存储引擎层负责数据的存储和提取。其架构模式是插件式的，支持 InnoDB、MyISAM、Memory 等多个存储引擎。现在最常用的存储引擎是 InnoDB，它从 MySQL 5.5.5 版本开始成为了默认存储引擎。
+
+
+
+
+
 MySQL支持诸多存储引擎，而各种存储引擎对索引的支持也各不相同，因此MySQL数据库支持多种索引类型，如BTree索引，哈希索引，全文索引等等
 MySQL官方对索引的定义为：索引（Index）是帮助MySQL高效获取数据的数据结构。提取句子主干，就可以得到索引的本质：索引是数据结构。
 
@@ -103,3 +113,4 @@ SELECT count(DISTINCT(title))/count(*) AS Selectivity FROM employees.titles;
 InnoDB的主键选择与插入优化
 
 使用InnoDB存储引擎时，如果没有特别的需要，请永远使用一个与业务无关的自增字段作为主键
+
