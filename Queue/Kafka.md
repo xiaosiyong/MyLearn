@@ -398,19 +398,116 @@ SyncGroup请求处理流程：SyncGroup 请求的主要目的，就是让协调�
 
 ![commitoffset](../images/commitoffset.png)
 
+#### Zookeeper
+
+**Apache ZooKeeper 是一个提供高可靠性的分布式协调服务框架**。。它使用的数据模型类似于文件系统的树形结构，根目录也是以“/”开始。该结构上的每个节点被称为 znode，用来保存一些元数据协调信息。如果以 znode 持久性来划分，**znode 可分为持久性 znode 和临时 znode**，。持久性 znode 不会因为 ZooKeeper 集群重启而消失，而临时 znode 则与创建该 znode 的 ZooKeeper 会话绑定，一旦会话结束，该节点会被自动删除。ZooKeeper 赋予客户端监控 znode 变更的能力，即所谓的 Watch 通知功能。一旦 znode 节点被创建、删除，子节点数量发生变化，抑或是 znode 所存的数据本身变更，ZooKeeper 会通过节点变更监听器 (ChangeHandler) 的方式显式通知客户端。
+
+#### Controller组件
+
+控制器组件（Controller），是 Apache Kafka 的核心组件。它的主要作用是在 Apache ZooKeeper 的帮助下管理和协调整个 Kafka 集群。集群中任意一台 Broker 都能充当控制器的角色，但是，在运行过程中，只能有一个 Broker 成为控制器，行使其管理和协调的职责。每个正常运转的 Kafka 集群，在任意时刻都有且只有一个控制器。官网上有个名为 activeController 的 JMX 指标，可以帮助我们实时监控控制器的存活状态。这个 JMX 指标非常关键，你在实际运维操作过程中，一定要实时查看这个指标的值。下面，我们就来详细说说控制器的原理和内部运行机制。
+
+实际上，Broker 在启动时，会尝试去 ZooKeeper 中创建 /controller 节点。Kafka 当前选举控制器的规则是：第一个成功创建 /controller 节点的 Broker 会被指定为控制器。
+
+控制器的职责大致分为5种：
+
+1、主题管理（创建、删除、增加分区）
+
+这里的主题管理，就是指控制器帮助我们完成对 Kafka 主题的创建、删除以及分区增加的操作。换句话说，当我们执行kafka-topics 脚本时，大部分的后台工作都是控制器来完成的。
+
+2、分区重分配
+
+分区重分配是指kafka-reassign-partitions脚本提供的对已有主题分区进行细粒度的分配功能，这部分功能也是控制器实现的。
+
+3、Preferred领导者选举
+
+Preferred领导者选举主要是Kafka为了避免部分Broker负载过重而提供的一种换Leader的方案。
+
+4、集群成员管理（新增Broker、Broker主动关闭、Broker宕机）
+
+包括自动检测新增Broker、Broker主动关闭及被动宕机，这种自动检测依赖于Zookeeper的Watch功能和Zookeeper临时节点组合实现的。控制器组件会利用Watch 机制检查 ZooKeeper 的 /brokers/ids 节点下的子节点数量变更。目前，当有新 Broker 启动后，它会在 /brokers 下创建专属的 znode 节点。一旦创建完毕，ZooKeeper 会通过 Watch 机制将消息通知推送给控制器，这样，控制器就能自动地感知到这个变化，进而开启后续的新增 Broker 作业。
+
+侦测 Broker 存活性则是依赖于刚刚提到的另一个机制：临时节点。每个 Broker 启动后，会在 /brokers/ids 下创建一个临时 znode。当 Broker 宕机或主动关闭后，该 Broker 与 ZooKeeper 的会话结束，这个 znode 会被自动删除。同理，ZooKeeper 的 Watch 机制将这一变更推送给控制器，这样控制器就能知道有 Broker 关闭或宕机了，从而进行“善后”。
+
+5、数据服务
+
+控制器的最后一类工作，就是向其他Broker提供数据服务。控制器上保存了最全的集群元数据信息，其他所有Broker会定期接收控制器发来的元数据更新请求，从而更新其内存中的缓存数据。
+
+控制器中保存的数据如图，其中比较重要的数据有：（1）所有主题信息。包括具体的分区信息，比如领导者副本是谁，ISR 集合中有哪些副本等。（2）所有 Broker 信息。包括当前都有哪些运行中的 Broker，哪些正在关闭中的 Broker 等。（3）所有涉及运维任务的分区。包括当前正在进行 Preferred 领导者选举以及分区重分配的分区列表。
+
+![kafkacontrollerdata](../images/kafkacontrollerdata.png)
+
+当然，这些数据在Zookeeper中也保存了一份。当控制器初始化时，会从Zookeeper上读取对应的元数据并填充到自己的缓存中。有了这些数据，控制器就可以通过向其他Broker发送请求，将数据同步过去。
+
+#### 控制器故障转移
+
+Kafka提供服务过程中，只有一台Broker充当控制器角色。当单点失效之后，就会发生Failover。故障转移指的是，当运行中的控制器突然宕机或意外终止时，Kafka 能够快速地感知到，并立即启用备用控制器来代替之前失败的控制器。这个过程就被称为 Failover，而且该过程是自动完成的，无需手动干预。故障转移过程如图：最开始时，Broker 0 是控制器。当 Broker 0 宕机后，ZooKeeper 通过 Watch 机制感知到并删除了 /controller 临时节点。之后，所有存活的 Broker 开始竞选新的控制器身份。Broker 3 最终赢得了选举，成功地在 ZooKeeper 上重建了 /controller 节点。之后，Broker 3 会从 ZooKeeper 中读取集群元数据信息，并初始化到自己的缓存中。至此，控制器的 Failover 完成，可以行使正常的工作职责了。
+
+![kafkafailover](../images/kafkafailover.png)
+
+#### 控制器内部设计原理
+
+控制器之前是多线程设计，自0.11版本开始改为单线程加事件队列的方案，规避了多线程之间的线程同步开销。同时，将之前同步操作Zookeeper全部改为异步操作。最新的改进是Broker对接收的请求会分优先级，比如删除了一个主题，那么控制器就会给该主题所有副本所在的 Broker 发送一个名为**StopReplica**的请求。如果此时 Broker 上存有大量积压的 Produce 请求，那么这个 StopReplica 请求只能排队等。如果这些 Produce 请求就是要向该主题发送消息的话，这就显得很讽刺了：主题都要被删除了，处理这些 Produce 请求还有意义吗？此时最合理的处理顺序应该是，**赋予 StopReplica 请求更高的优先级，使它能够得到抢占式的处理**。自2.2开始，支持这种不同优先级请求的处理。
+
+#### 关于高水位和Leader Epoch
+
+水位的经典定义：在时刻 T，任意创建时间（Event Time）为 T’，且 T’≤T 的所有事件都已经到达或被观测到，那么 T 就被定义为水位。也有这样描述：水位是一个单调增加且表征最早未完成工作（oldest work not yet completed）的时间戳。如图：图中标注“Completed”的蓝色部分代表已完成的工作，标注“In-Flight”的红色部分代表正在进行中的工作，两者的边界就是水位线。
+
+![watermark](../images/watermark.png)
+
+Kafka中，水位是和位置信息绑定的，具体来说，它是用消息位移来表征的。
+
+#### 高水位的作用：
+
+1、定义消息可见性，及用来标识分区下的哪些消息是可以被消费者消费的
+
+2、帮助Kafka完成副本同步
+
+例如：
+
+![kafkahw](../images/kafkahw.png)
+
+假如这是某个分区Leader副本的高水位图。在分区高水位以下的消息被认为是已提交消息，反之就是未提交消息。消费者只能消费已提交消息，即图中位移小于 8 的所有消息。注意，这里我们不讨论 Kafka 事务，因为事务机制会影响消费者所能看到的消息的范围，它不只是简单依赖高水位来判断。它依靠一个名为 LSO（Log Stable Offset）的位移值来判断事务型消费者的可见性。另外，**位移值等于高水位的消息也属于未提交消息。也就是说，高水位上的消息是不能被消费者消费的**。图中还有一个日志末端位移的概念，即 Log End Offset，简写是 LEO。它表示副本写入下一条消息的位移值。注意，数字 15 所在的方框是虚线，这就说明，这个副本当前只有 15 条消息，位移值是从 0 到 14，下一条新消息的位移是 15。显然，介于高水位和 LEO 之间的消息就属于未提交消息。这也从侧面告诉了我们一个重要的事实，那就是：**同一个副本对象，其高水位值不会大于 LEO 值**。
+
+**高水位和 LEO 是副本对象的两个重要属性**，。Kafka 所有副本都有对应的高水位和 LEO 值，而不仅仅是 Leader 副本。只不过 Leader 副本比较特殊，Kafka 使用 Leader 副本的高水位来定义所在分区的高水位。换句话说，**分区的高水位就是其 Leader 副本的高水位**。
+
+
+
 
 
 
 
 #### Kafka命令行集合：
 
-查看消费者组消费情况：     bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group test_order_to_es_groupId0
+**1、查看消费者组消费情况**：     bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group test_order_to_es_groupId0
 
-创建topic：bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic test
+**2、创建topic**：bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic test，推荐使用--bootstrap-server而非--Zookeeper的原因有两个：
 
-查看topiclist：bin``/kafka-topics``.sh --list --bootstrap-server localhost:9092
+- 使用 --zookeeper 会绕过 Kafka 的安全体系。这就是说，即使你为 Kafka 集群设置了安全认证，限制了主题的创建，如果你使用 --zookeeper 的命令，依然能成功创建任意主题，不受认证体系的约束。这显然是 Kafka 集群的运维人员不希望看到的。
 
-给某个topic发消息：bin``/kafka-console-producer``.sh --broker-list localhost:9092 --topic ``test
+- 使用 --bootstrap-server 与集群进行交互，越来越成为使用 Kafka 的标准姿势。换句话说，以后会有越来越少的命令和 API 需要与 ZooKeeper 进行连接。这样，我们只需要一套连接信息，就能与 Kafka 进行全方位的交互，不用像以前一样，必须同时维护 ZooKeeper 和 Broker 的连接信息。
 
-开启消费者：bin``/kafka-console-consumer``.sh --bootstrap-server localhost:9092 --topic ``test` `--from-beginning
+删除topic：删除操作是异步的，仅仅是被标记成“已删除”的状态，真正删除，需要配置文件参数enable。
 
+bin/kafka-topics.sh --bootstrap-server broker_host:port --delete  --topic <topic_name>
+
+**3、查看topiclist**：bin``/kafka-topics``.sh --list --bootstrap-server localhost:9092
+
+**4、查询单个主题的详细数据**：
+
+bin/kafka-topics.sh --bootstrap-server broker_host:port --describe --topic <topic_name>
+
+**5、给某个topic发消息**：bin``/kafka-console-producer``.sh --broker-list localhost:9092 --topic ``test
+
+**6、开启消费者**：bin``/kafka-console-consumer``.sh --bootstrap-server localhost:9092 --topic ``test` `--from-beginning
+
+**7、修改主题分区**，目前不允许减少某个主题的分区，可以用kafka-topics脚本结合-alter参数来增肌主题的分区，命令如下：bin/kafka-topics.sh --bootstrap-server broker_host:port --alter --topic <topic_name> --partitions < 新分区数 > **新分区数一定要比原分区数大，不然会抛异常**
+
+8、修改主题级别参数，主题创建之后，可以使用kafka-configs脚本来修改对应的参数：bin/kafka-configs.sh --zookeeper zookeeper_host:port --entity-type topics --entity-name <topic_name> --alter --add-config max.message.bytes=10485760  **设置常规的主题级别参数，还是用\--Zookeeper**
+
+9、变更副本数，使用自带的kafka-reassign-partitions脚本，帮助我们增加主题的副本数。
+
+#### 常见错误
+
+1、主题删除失败。实际上，造成主题删除失败的原因有很多，最常见的原因有两个：副本所在的 Broker 宕机了；待删除主题的部分分区依然在执行迁移过程。如果是因为前者，通常你重启对应的 Broker 之后，删除操作就能自动恢复；如果是因为后者，那就麻烦了，很可能两个操作会相互干扰。不管什么原因，一旦你碰到主题无法删除的问题，可以采用这样的方法：第 1 步，手动删除 ZooKeeper 节点 /admin/delete_topics 下以待删除主题为名的 znode。第 2 步，手动删除该主题在磁盘上的分区目录。第 3 步，在 ZooKeeper 中执行 rmr  /controller，触发 Controller 重选举，刷新 Controller 缓存。在执行最后一步时，你一定要谨慎，因为它可能造成大面积的分区 Leader 重选举。事实上，仅仅执行前两步也是可以的，只是 Controller 缓存中没有清空待删除主题罢了，也不影响使用。
+
+ 2：__consumer_offsets 占用太多的磁盘。一旦你发现这个主题消耗了过多的磁盘空间，那么，你一定要显式地用 **jstack 命令**查看一下 kafka-log-cleaner-thread 前缀的线程状态。通常情况下，这都是因为该线程挂掉了，无法及时清理此内部主题。倘若真是这个原因导致的，那我们就只能重启相应的 Broker 了。
