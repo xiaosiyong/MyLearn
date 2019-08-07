@@ -354,3 +354,31 @@ Trie树的本质，就是利用字符串之间的公共前缀，将重复的前�
 ![triep2](../images/triep2.png)
 
 匹配过程：
+
+
+
+#### 多模式串匹配算法（实现敏感词过滤）
+
+用Trie树实现敏感词过滤，我们可以对敏感词字典进行预处理，构建成 Trie 树结构。这个预处理的操作只需要做一次，如果敏感词字典动态更新了，比如删除、添加了一个敏感词，那我们只需要动态更新一下 Trie 树就可以了。
+
+##### 经典的多模式串匹配算法：AC 自动机
+
+AC 自动机算法，全称是 Aho-Corasick 算法。其实，Trie 树跟 AC 自动机之间的关系，就像单串匹配中朴素的串匹配算法，跟 KMP 算法之间的关系一样，只不过前者针对的是多模式串而已。所以，**AC 自动机实际上就是在 Trie 树之上，加了类似 KMP 的 next 数组，只不过此处的 next 数组是构建在树上罢了**。如果代码表示，就是下面这个样子：
+
+~~~java
+public class AcNode {
+  public char data; 
+  public AcNode[] children = new AcNode[26]; // 字符集只包含 a~z 这 26 个字符
+  public boolean isEndingChar = false; // 结尾字符为 true
+  public int length = -1; // 当 isEndingChar=true 时，记录模式串长度
+  public AcNode fail; // 失败指针
+  public AcNode(char data) {
+    this.data = data;
+  }
+}
+~~~
+
+AC自动机的构建，包含两个操作：将多个模式串构建成 Trie 树和在 Trie 树上构建失败指针（相当于 KMP 中的失效函数 next 数组）。
+
+
+
