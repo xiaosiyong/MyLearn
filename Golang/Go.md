@@ -487,14 +487,6 @@ once.Do(fn(){})//只执行一次
 
 Do会在函数结束调用之前，在defer语句里，把字段done通过原子操作置为1。
 
-#### Sync.Map
-
-并发安全字典对键的类型要是不能为函数类型、字典类型和切片类型。如何做到检查Key和Value的类型呢？有两种方法：使用类型断言表达式或者反射操作
-
-1）让并发安全字典只能存储某个特定类型的键，Load，Store，等操作都只能Key的类型。利用Go语言编译器去做类型检查。
-
-2）封装struct，除了sync.Map之外，再封装keyType和valueType 都为reflect.Type，虽然灵活，但是反射或多或少会降低性能。
-
 #### make 与 new 关键字
 
 new是一个用来分配内存的内建函数，它不初始化内存，只是将其置零。`new(T)`会为`T`类型的新项目，分配被置零的存储，并且返回它的地址，一个类型为`*T`的值。在Go的术语中，其返回一个指向新分配的类型为`T`，值为零的指针。内建函数`make(T,`*args*`)`与`new(T)`的用途不一样。它只用来创建slice，map和channel，并且返回一个*初始化的*(而不是*置零*)，类型为`T`的值（而不是`*T`）。`make`只用于map，slice和channel，并且不返回指针。要获得一个显式的指针，使用`new`进行分配，或者显式地使用一个变量的地址。
@@ -502,4 +494,90 @@ new是一个用来分配内存的内建函数，它不初始化内存，只是�
 #### Sync.Pool
 
 不需要持久使用，对程序来说可有可无，但如果有会更好，创建和销毁可以在任何时刻发生，且不会影响程序的功能。同时，也不会被区分，其中的任何一个都可以代替另一个。如果某个类型的值满足上述特征，可以放到对象池里。更多的时候，我们可以把临时对象池当作针对某种数据的缓存来用。
+
+临时对象池存储值所用的数据结构：临时对象池中，有一个多层的数据结构。这个数据结构的顶层，我们称为本地池列表，更确切的说是一个数组。这个列表的长度，与Go语言调度器中的P的数量相同。本地池列表中的每个本地池都包含了三个字段，存储私有临时对象的字段private、代表了共享临时对象列表的字段shared，以及一个sync.Mutex类型的嵌入字段。每个本地池都对应着一个P，一个正在运行的goroutine必然会关联着某个P。在程序调用临时对象池的Put方法或GET方法的时候，会试图从该临时对象池的本地池中，获取与之对应的本地池，一句的就是与当前goroutine关联的那个P的ID。临时对象池的Put方法总会先试图把新的临时对象，存储到对应的本地池的private字段中，以便在后面获取临时对象的时候，可以快速地拿到一个可用的值。只有当private字段已经有值时，才会访问本地池的shared字段。Get方法反之亦然。一个本地池的shared字段原则上可以被任何 goroutine 中的代码访问到，不论这个 goroutine 关联的是哪一个 P。这也是我把它叫做共享临时对象列表的原因。而本地池的private字段，只能被与之对应的那个P关联的goroutine中的代码访问。
+
+#### 并发安全字典sync.Map
+
+使用锁意味着把一些并发的操作强制串行化，这在计算机拥有多个CPU核心的情况下会降低程序的性能。因此，我们常说，**能用原子操作就不要用锁**。
+
+并发安全字典对键的类型要是不能为函数类型、字典类型和切片类型。同原生map一样，需要支持**== 和 !=** ，如何做到检查Key和Value的类型呢？有两种方法：使用类型断言表达式或者反射操作
+
+1）让并发安全字典只能存储某个特定类型的键，Load，Store，等操作都只能Key的类型。利用Go语言编译器去做类型检查。
+
+~~~go
+type IntStrMap struct {
+ m sync.Map
+}
+
+func (iMap *IntStrMap) Delete(key int) {
+ iMap.m.Delete(key)
+}
+
+func (iMap *IntStrMap) Load(key int) (value string, ok bool) {
+ v, ok := iMap.m.Load(key)
+ if v != nil {
+  value = v.(string)
+ }
+ return
+}
+
+func (iMap *IntStrMap) LoadOrStore(key int, value string) (actual string, loaded bool) {
+ a, loaded := iMap.m.LoadOrStore(key, value)
+ actual = a.(string)
+ return
+}
+
+func (iMap *IntStrMap) Range(f func(key int, value string) bool) {
+ f1 := func(key, value interface{}) bool {
+  return f(key.(int), value.(string))
+ }
+ iMap.m.Range(f1)
+}
+
+func (iMap *IntStrMap) Store(key int, value string) {
+ iMap.m.Store(key, value)
+}
+
+~~~
+
+
+
+2）封装struct，除了sync.Map之外，再封装keyType和valueType 都为reflect.Type，虽然灵活，但是反射或多或少会降低性能。
+
+~~~go
+type ConcurrentMap struct {
+ m         sync.Map
+ keyType   reflect.Type
+ valueType reflect.Type
+}
+
+~~~
+
+Load方法：
+
+~~~go
+func (cMap *ConcurrentMap) Load(key interface{}) (value interface{}, ok bool) {
+ if reflect.TypeOf(key) != cMap.keyType {
+  return
+ }
+ return cMap.m.Load(key)
+}
+
+~~~
+
+Store
+
+~~~go
+func (cMap *ConcurrentMap) Store(key, value interface{}) {
+ if reflect.TypeOf(key) != cMap.keyType {
+  panic(fmt.Errorf("wrong key type: %v", reflect.TypeOf(key)))
+ }
+ if reflect.TypeOf(value) != cMap.valueType {
+  panic(fmt.Errorf("wrong value type: %v", reflect.TypeOf(value)))
+ }
+ cMap.m.Store(key, value)
+}
+
+~~~
 

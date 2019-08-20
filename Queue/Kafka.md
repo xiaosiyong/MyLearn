@@ -511,3 +511,52 @@ bin/kafka-topics.sh --bootstrap-server broker_host:port --describe --topic <topi
 1、主题删除失败。实际上，造成主题删除失败的原因有很多，最常见的原因有两个：副本所在的 Broker 宕机了；待删除主题的部分分区依然在执行迁移过程。如果是因为前者，通常你重启对应的 Broker 之后，删除操作就能自动恢复；如果是因为后者，那就麻烦了，很可能两个操作会相互干扰。不管什么原因，一旦你碰到主题无法删除的问题，可以采用这样的方法：第 1 步，手动删除 ZooKeeper 节点 /admin/delete_topics 下以待删除主题为名的 znode。第 2 步，手动删除该主题在磁盘上的分区目录。第 3 步，在 ZooKeeper 中执行 rmr  /controller，触发 Controller 重选举，刷新 Controller 缓存。在执行最后一步时，你一定要谨慎，因为它可能造成大面积的分区 Leader 重选举。事实上，仅仅执行前两步也是可以的，只是 Controller 缓存中没有清空待删除主题罢了，也不影响使用。
 
  2：__consumer_offsets 占用太多的磁盘。一旦你发现这个主题消耗了过多的磁盘空间，那么，你一定要显式地用 **jstack 命令**查看一下 kafka-log-cleaner-thread 前缀的线程状态。通常情况下，这都是因为该线程挂掉了，无法及时清理此内部主题。倘若真是这个原因导致的，那我们就只能重启相应的 Broker 了。
+
+#### 消费者组位移
+
+重设位移策略
+
+![offsetpolicy](../images/offsetpolicy.jpeg)
+
+可通过API以及命令行的方式：
+
+Earliest 策略直接指定–to-earliest：
+
+bin/kafka-consumer-groups.sh --bootstrap-server kafka-host:port --group test-group --reset-offsets --all-topics --to-earliest –execute
+
+Latest 策略直接指定–to-latest：
+
+bin/kafka-consumer-groups.sh --bootstrap-server kafka-host:port --group test-group --reset-offsets --all-topics --to-latest --execute
+
+Current 策略直接指定–to-current
+
+bin/kafka-consumer-groups.sh --bootstrap-server kafka-host:port --group test-group --reset-offsets --all-topics --to-current --execute
+
+bin/kafka-consumer-groups.sh --bootstrap-server kafka-host:port --group test-group --reset-offsets --all-topics --to-offset <offset> --execute
+
+bin/kafka-consumer-groups.sh --bootstrap-server kafka-host:port --group test-group --reset-offsets --shift-by <offset_N> --execute
+
+bin/kafka-consumer-groups.sh --bootstrap-server kafka-host:port --group test-group --reset-offsets --to-datetime 2019-06-20T20:00:00.000 --execute
+
+bin/kafka-consumer-groups.sh --bootstrap-server kafka-host:port --group test-group --reset-offsets --by-duration PT0H30M0S --execute
+
+#### 动态调整参数
+
+有可能需要调整的参数：
+
+1. log.retention.ms。修改日志留存时间应该算是一个比较高频的操作，毕竟，我们不可能完美地预估所有业务的消息留存时长。虽然该参数有对应的主题级别参数可以设置，但拥有在全局层面上动态变更的能力，依然是一个很好的功能亮点。
+
+2. num.io.threads 和 num.network.threads。这是我们在前面提到的两组线程池。就我个人而言，我觉得这是动态 Broker 参数最实用的场景了。毕竟，在实际生产环境中，Broker 端请求处理能力经常要按需扩容。如果没有动态 Broker 参数，我们是无法做到这一点的。
+
+3. 与 SSL 相关的参数。主要是 4 个参数（ssl.keystore.type、ssl.keystore.location、ssl.keystore.password 和 ssl.key.password）。允许动态实时调整它们之后，我们就能创建那些过期时间很短的 SSL 证书。每当我们调整时，Kafka 底层会重新配置 Socket 连接通道并更新 Keystore。新的连接会使用新的 Keystore，阶段性地调整这组参数，有利于增加安全性。
+4. num.replica.fetchers。这也是我认为的最实用的动态 Broker 参数之一。Follower 副本拉取速度慢，在线上 Kafka 环境中一直是一个老大难的问题。针对这个问题，常见的做法是增加该参数值，确保有充足的线程可以执行 Follower 副本向 Leader 副本的拉取。现在有了动态参数，你不需要再重启 Broker，就能立即在 Follower 端生效，因此我说这是很实用的应用场景。
+
+
+
+
+
+
+
+bin/kafka-consumer-groups.sh --bootstrap-server 172.16.6.52:9092, 172.16.6.53:9092,172.16.6.54:9092 --describe --group pro_rev_consumer_award_group_001
+
+bin/kafka-topics.sh --bootstrap-server 172.16.6.52:9092, 172.16.6.53:9092,172.16.6.54:9092,--describe --topic pro_award_compute_rev_topic
