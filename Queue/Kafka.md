@@ -551,7 +551,11 @@ bin/kafka-consumer-groups.sh --bootstrap-server kafka-host:port --group test-gro
 3. 与 SSL 相关的参数。主要是 4 个参数（ssl.keystore.type、ssl.keystore.location、ssl.keystore.password 和 ssl.key.password）。允许动态实时调整它们之后，我们就能创建那些过期时间很短的 SSL 证书。每当我们调整时，Kafka 底层会重新配置 Socket 连接通道并更新 Keystore。新的连接会使用新的 Keystore，阶段性地调整这组参数，有利于增加安全性。
 4. num.replica.fetchers。这也是我认为的最实用的动态 Broker 参数之一。Follower 副本拉取速度慢，在线上 Kafka 环境中一直是一个老大难的问题。针对这个问题，常见的做法是增加该参数值，确保有充足的线程可以执行 Follower 副本向 Leader 副本的拉取。现在有了动态参数，你不需要再重启 Broker，就能立即在 Follower 端生效，因此我说这是很实用的应用场景。
 
+#### 重设消费者位移
 
+Kafka可以从时间和位移维度来重设位移，具体策略有：
+
+![kafkaresetoffset](../images/kafkaresetoffset.jpeg)
 
 
 

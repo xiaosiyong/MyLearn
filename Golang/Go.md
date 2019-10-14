@@ -40,7 +40,7 @@ slice = append(slice, anotherSlice...)
 
 s := arr[startIndex:endIndex] ，从startIndex~endIndex-1，如果缺省endIndex则表示到最后一个元素
 
-**对应TOML配置文件时，对应的Struct必须大写，小写时没法映射**
+**对应TOML配置文件时，对应的Struct必须大写，小写时没法映射，如果是单独属性名放在前边，放在带有标签下的属性时容易映射失败**
 
 \#string到int
 
@@ -580,4 +580,10 @@ func (cMap *ConcurrentMap) Store(key, value interface{}) {
 }
 
 ~~~
+
+#### Sync.Map内部实现
+
+sync.Map内部大量使用了原子操作来存取键和值，并使用了两个原生的map作为存储介质。其中**一个原生map被存在了sync.Map的read字段中，该字段是sync/atomic.Value类型的**。这个原生字典可以被看作一个快照，它总会在条件满足时，重新保存所属的sync.Map值中包含的所有键值对。这个字典不会增减其中的键，但却允许变更其中的键所对应的值。所以，它的只读特性只是对于其中键的集合而言的。
+
+
 
