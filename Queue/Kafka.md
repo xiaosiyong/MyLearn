@@ -498,13 +498,45 @@ bin/kafka-topics.sh --bootstrap-server broker_host:port --describe --topic <topi
 
 **5、给某个topic发消息**：bin``/kafka-console-producer``.sh --broker-list localhost:9092 --topic ``test
 
-**6、开启消费者**：bin``/kafka-console-consumer``.sh --bootstrap-server localhost:9092 --topic ``test` `--from-beginning
+**6、开启消费者**：bin``/kafka-console-consumer``.sh --bootstrap-server localhost:9092 --topic ``test` `--from-beginning    --group test-group 命令中指定了group。如果未指定，每次会自动生成一个新的消费者组来消费。久而久之会有大量的console-consumer开头的消费者组。from-beginning等同于将Consumer端参数auto.offset.reset设置成earliest，表明从头开始消费主体。如果不指定，会默认从最新位移读取消息。如果此时没有任何新消息，该命令输出为空。  
 
 **7、修改主题分区**，目前不允许减少某个主题的分区，可以用kafka-topics脚本结合-alter参数来增肌主题的分区，命令如下：bin/kafka-topics.sh --bootstrap-server broker_host:port --alter --topic <topic_name> --partitions < 新分区数 > **新分区数一定要比原分区数大，不然会抛异常**
 
 8、修改主题级别参数，主题创建之后，可以使用kafka-configs脚本来修改对应的参数：bin/kafka-configs.sh --zookeeper zookeeper_host:port --entity-type topics --entity-name <topic_name> --alter --add-config max.message.bytes=10485760  **设置常规的主题级别参数，还是用\--Zookeeper**
 
 9、变更副本数，使用自带的kafka-reassign-partitions脚本，帮助我们增加主题的副本数。
+
+10、生产消息使用kafka-console-produ脚本
+
+bin/kafka-console-producer.sh --broker-list kafka-host:port --topic test-topic --request-required-acks -1 --producer-property compression.type=lz4
+
+11、测试生产者及消费者性能 脚本 ：**kafka-producer-perf-test     kafka-consumer-perf-test** 
+
+典型的调用方式：
+
+bin/kafka-producer-perf-test.sh --topic test-topic --num-records 10000000 --throughput -1 --record-size 1024 --producer-props bootstrap.servers=kafka-host:port acks=-1 linger.ms=2000 compression.type=lz4
+
+2175479 records sent, 435095.8 records/sec (424.90 MB/sec), 131.1 ms avg latency, 681.0 ms max latency.
+4190124 records sent, 838024.8 records/sec (818.38 MB/sec), 4.4 ms avg latency, 73.0 ms max latency.
+10000000 records sent, 737463.126844 records/sec (720.18 MB/sec), 31.81 ms avg latency, 681.00 ms max latency, 4 ms 50th, 126 ms 95th, 604 ms 99th, 672 ms 99.9th.
+
+上述命令向指定主题发送1千万条消息，每条消息大小1KB。命令的输出：
+
+它会打印出测试生产者的吞吐量 (MB/s)、消息发送延时以及各种分位数下的延时。一般情况下，消息延时不是一个简单的数字，而是一组分布。或者说，我们应该关心延时的概率分布情况，仅仅知道一个平均值是没有意义的。这就是这里计算分位数的原因。通常我们关注到99th 分位就可以了。比如在上面的输出中，99th 值是 604ms，这表明测试生产者生产的消息中，有 99% 消息的延时都在 604ms 以内。你完全可以把这个数据当作这个生产者对外承诺的 SLA。
+
+12、**查看主题消息总数**
+
+bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list kafka-host:port --time -2 --topic test-topic
+
+test-topic:0:0
+test-topic:1:0
+
+$ bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list kafka-host:port --time -1 --topic test-topic
+
+test-topic:0:5500000
+test-topic:1:5500000 使用Kafka提供的工具类 GetOffsetShell来计算给定主题特定分区当前的最早位移和最新位移，两者累加即可得到总的消息数。
+
+>
 
 #### 常见错误
 
@@ -564,3 +596,4 @@ Kafka可以从时间和位移维度来重设位移，具体策略有：
 bin/kafka-consumer-groups.sh --bootstrap-server 172.16.6.52:9092, 172.16.6.53:9092,172.16.6.54:9092 --describe --group pro_rev_consumer_award_group_001
 
 bin/kafka-topics.sh --bootstrap-server 172.16.6.52:9092, 172.16.6.53:9092,172.16.6.54:9092,--describe --topic pro_award_compute_rev_topic
+
