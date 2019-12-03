@@ -1,6 +1,6 @@
-### Java基础
+## Java必备
 
-#### 垃圾回收
+### 垃圾回收
 
 对象在物理内存空间被划分为两部分，新生代（young generate）和老年代（old generate）
 
@@ -10,17 +10,17 @@
 
 ![gc图](../images/java-gc.png)
 
-# Java多线程
+### 多线程
 线程是JVM执行任务的最小单元
 
-### 1、JVM中线程的状态
+####  1、JVM中线程的状态
     * New
     * Runable（Ready<===>Running）
     * Blocked
     * Terminated
     * Waiting
     * Time_Waiting
-### 2、状态转换
+#### 2、状态转换
 
 ![state](../images/multi-thread.png)
 
@@ -35,7 +35,7 @@
 
 最后是线程运行完成结束时，如图下方，线程状态变成Terminated
 
-## 3、线程池
+### 3、线程池
 Executors工具类中提供了5种线程池的创建方法
 
     * 固定大小线程池，特点是线程数固定，使用无界队列，适用于任务数量不均匀的场景、对内存压力不敏感，但系统负载比较敏感的场景；
@@ -49,4 +49,10 @@ Executors工具类中提供了5种线程池的创建方法
     * 工作窃取线程池，使用的ForkJoinPool，是固定并行度的多任务队列，适合任务执行时长不均匀的场景。
 [原文链接](https://mp.weixin.qq.com/s?__biz=MjM5MTE1NTQ4Mg==&mid=2649731439&idx=1&sn=64046fcaad7be914dcf922ec0a34cad7&chksm=bea2c51a89d54c0c6d258d4eae50b3a477fcf8227bc360591403dc9282ffce3f9c5bbc46b581&token=1490087409&lang=zh_CN#rd)
 
-#### ThreadPoolExcutor
+### ThreadPoolExcutor
+
+### JVM
+
+jvm主要有类加载器、运行时数据区、执行引擎三个部分组成。如下图：
+
+![java-jvm](../images/java-jvm.png)
