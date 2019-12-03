@@ -1,100 +1,138 @@
+## Golang 
+
 ### 数组
 
-数组的初始化：
-
-var array [5]int 
-
-go 语言初始化时，会使用对应的零值来给元素初始化。
-
-快速创建：
-
-array := [5]int{1,2,3,4,5}或者 array := [...]int{1,2,3}
-
-声明并给指定元素赋值：
-
-array := [5]int{1: 10, 2: 20}
+数组的初始化：var array [5]int ，go 语言初始化时，会使用对应的零值来给元素初始化。快速创建：array := [5]int{1,2,3,4,5} 或者 array := [...]int{1,2,3}；声明并给指定元素赋值：array := [5]int{1: 10, 2: 20}。
 
 指针对象如果没有初始化直接赋值，会报错，如下所示：
 
+~~~go
 ptr1 := [3]*int{0:new(int),1:new(int)}
-
 *ptr1[2] = 10
+~~~
 
-数组变量的类型包括数组长度和每个元素的类型。只有这两部分都相同的数组，才是类型相同的数组，才能互相赋值。
-
-编译器会阻止类型不同的数组互相赋值。
-
-
+数组变量的类型包括数组长度和每个元素的类型。只有这两部分都相同的数组，才是类型相同的数组，才能互相赋值。编译器会阻止类型不同的数组互相赋值。
 
 append的用法有两种：
 
+- 直接append单个元素，第一个参数为slice,后面可以添加多个参数。 
+
+~~~go
 slice = append(slice, elem1, elem2)
+~~~
 
+- append另外一个slice，在第二个slice的名称后面加三个点，而且这时候append只支持两个参数，不支持任意个数的参数。
+
+~~~go
 slice = append(slice, anotherSlice...)
-
-第一种用法中，第一个参数为slice,后面可以添加多个参数。
-
-如果是将两个slice拼接在一起，则需要使用第二种用法，在第二个slice的名称后面加三个点，而且这时候append只支持两个参数，不支持任意个数的参数。
+~~~
 
 ### 切片：
 
-s := arr[startIndex:endIndex] ，从startIndex~endIndex-1，如果缺省endIndex则表示到最后一个元素
+~~~go
+s := arr[startIndex:endIndex] 
+~~~
 
-**对应TOML配置文件时，对应的Struct必须大写，小写时没法映射，如果是单独属性名放在前边，放在带有标签下的属性时容易映射失败**
+从startIndex~endIndex-1，如果缺省endIndex则表示到最后一个元素
 
-\#string到int
+### 类型互相转换
 
+- string到int
+
+~~~go
 int,err:=strconv.Atoi(string)
+~~~
 
-\#string到int64
+- string到int64
 
+~~~go
 int64, err := strconv.ParseInt(string, 10, 64)
+~~~
 
-\#int到string
+- int到string
 
+~~~go
 string:=strconv.Itoa(int)
+~~~
 
-\#int64到string
+- int64到string
 
+```go
 string:=strconv.FormatInt(int64,10)
+```
 
-使用下划线_可以导入未使用的包
+### 易忽略的点
 
-不想跳出case循环，即执行完一个分支再进入下一个分支时使用fallthrough关键字
+- **对应TOML配置文件时，对应的Struct必须大写，小写时没法映射，如果是单独属性名放在前边，放在带有标签下的属性时容易映射失败**；
+- 使用下划线_可以导入未使用的包
+- 不想跳出case循环，即执行完一个分支再进入下一个分支时使用fallthrough关键字
+- var identifier []type声明切片，切片在未初始化之前默认为nil，长度为0
+- var slice []type=array[start:end]，表示的是从数组array start到end-1索引之间的元素构成的子集。
+- 切片、接口、map、通道默认都是引用传递
+- 变参函数可以接受slice作参数
 
-var identifier []type声明切片，切片在未初始化之前默认为nil，长度为0
+### new 和 make 区别
 
-var slice []type=array[start:end]，表示的是从数组array start到end-1索引之间的元素构成的子集。
+make关键字的主要作用是初始化内置数据结构，比如：数组、切片、哈希表和channel，`new`用于分配并创建一个指向对应类型的指针，当我们想要获取某个类型的指针时可以使用`new`关键字。new(T) 分配类型 T 的零值并返回其地址，也就是指向类型 T 的指针如图：
 
-切片、接口、map、通道默认都是引用传递
+![golang-make-and-new](../images/golang-make-and-new.png)
 
-变参函数可以接受slice作参数
+```go
+i := new(int)
+var v int
+i := &v
+```
 
-**new 和 make 区别**
+上述代码片段中的两种不同初始化方法其实是等价的，它们都会创建一个指向 `int` 零值的指针。
 
-new 和 make 均是用于分配内存：new 用于值类型和用户定义的类型，如自定义结构，make 用于内置引用类型（切片、map 和管道）。它们的用法就像是函数，但是将类型作为参数：new(type)、make(type)。new(T) 分配类型 T 的零值并返回其地址，也就是指向类型 T 的指针（详见第 10.1 节）。它也可以被用于基本类型：v := new(int)。make(T) 返回类型 T 的初始化之后的值，因此它比 new 进行更多的工作（详见第 7.2.3/4 节、第 8.1.1 节和第 14.2.1 节）new() 是一个函数，不要忘记它的括号
-
-
+### Interface 
 
 接口类型检测：
 
-switch t :=  xxx.(type)
+~~~go
+type USB interface {
+	Name() string
+	Connect()
+}
+func (phone PhoneConnector) Name()string  {
+	return phone.name
+}
+func (phone PhoneConnector)Connect(){
+	fmt.Println("Connect"+phone.name)
+}
+func main(){
+	var a USB
+	a=PhoneConnector{"Iphone"}
+	switch param := a.(type) {
+	case PhoneConnector:
+		fmt.Printf("%T,%v",param,param)
+	}
+	a.Connect()
+	Disconnect(a)
+}
 
-case condition:
+func Disconnect(usb USB){
+	if pc,ok:=usb.(PhoneConnector);ok{
+		fmt.Println("Disconnected:"+pc.name)
+		return
+	}
+	fmt.Println("Unknown device.")
+}
+//如何检测一个值v是否实现了接口Stringer：
+if v, ok := v.(Stringer); ok {
+    fmt.Printf("implements String(): %s\n", v.String())
+}
+~~~
 
-XXXXXXXX
+每个 interface {} 变量在内存中占据两个字长：一个用来存储它包含的类型，另一个用来存储它包含的数据或者指向数据的指针。**如果将某个类型的切片赋值给一个空接口切片，需要显示赋值，原因是在内存中结构不一样**，通过`for-range`逐条赋值。方法集定义了一组关联到给定类型的值或者指针的方法，定义方法时使用的接收者的类型决定了这个方法是关联到值，还是关联到指针，还是两个都关联。go语言中方法集的规则：
 
+![methodset](../images/methodset.png)
 
+从接收者类型的角度来看方法集：
 
-if   v,ok:=xxx.(type);ok{
+![go-methodset-receiver](../images/go-methodset-receiver.png)
 
-......}
-
-
-
-每个 interface {} 变量在内存中占据两个字长：一个用来存储它包含的类型，另一个用来存储它包含的数据或者指向数据的指针。
-
-如果将某个类型的切片赋值给一个空接口切片，需要显示赋值，原因是在内存中结构不一样。
+通过这个规则我们发现，**如果使用指针接受者来实现一个接口，那么只有指向那个类型的指针才能够实现对应的接口。如果使用值接受者来实现一个接口，那么那个类型的值和指针都能实现对应的接口**。
 
 通过反射修改值
 
@@ -133,12 +171,6 @@ b :=  a[0:2:cap(a)]      初始化切片时右边的是开区间，左边是闭�
 Actor模型和CSP模型
 
 <<1 
-
-命令行翻墙：
-
-启用：source socks-cli/activate
-
-禁用：source socks-cli/deactivate
 
 返回值是值类型还是引用类型：
 
