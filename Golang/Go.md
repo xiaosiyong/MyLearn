@@ -134,13 +134,34 @@ if v, ok := v.(Stringer); ok {
 
 通过这个规则我们发现，**如果使用指针接受者来实现一个接口，那么只有指向那个类型的指针才能够实现对应的接口。如果使用值接受者来实现一个接口，那么那个类型的值和指针都能实现对应的接口**。
 
-通过反射修改值
+#### 反射
 
-v :=  reflect.valueof(x)
+[反射详细解析](![image-20191206164801126](/Users/iss/Library/Application Support/typora-user-images/image-20191206164801126.png))
 
-v  =  v.Elem()
+如果需要修改反射类型的值，一定是要settable的，也就是反射类型的指针，不然会报错。具体步骤：先拿到反射后的指针，然后调用Elem()方法，然后调用对应的Set方法。
 
-**There's no reason to use a map when an array or slice will do.**
+~~~go
+type T struct {
+    A int
+    B string
+}
+t := T{23, "Dom Xiao"}
+s := reflect.ValueOf(&t).Elem()
+typeOfT := s.Type()
+for i := 0; i < s.NumField(); i++ {
+    f := s.Field(i)
+    fmt.Printf("%d: %s %s = %v\n", i,
+        typeOfT.Field(i).Name, f.Type(), f.Interface())
+}
+
+//输出
+0: A int = 23
+1: B string = skidoo
+
+s.Field(0).SetInt(77)
+s.Field(1).SetString("Sunset Strip")
+fmt.Println("t is now", t)//t is now {77 Sunset Strip}
+~~~
 
 **并发控制方式：**
 
