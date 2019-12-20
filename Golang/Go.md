@@ -2,7 +2,7 @@
 
 ### 数组
 
-数组的初始化：var array [5]int ，go 语言初始化时，会使用对应的零值来给元素初始化。快速创建：array := [5]int{1,2,3,4,5} 或者 array := [...]int{1,2,3}；声明并给指定元素赋值：array := [5]int{1: 10, 2: 20}。
+数组的初始化 **var array [5]int **，go 语言初始化时，会使用对应的零值来给元素初始化。数组不需要显示初始化；数组的零值是一个随时能用的本身就为零值的数组：例如以上的array现在是5个值都为0的一个数组。快速创建：array := [5]int{1,2,3,4,5} 或者 array := [...]int{1,2,3}；声明并给指定元素赋值：array := [5]int{1: 10, 2: 20}。
 
 指针对象如果没有初始化直接赋值，会报错，如下所示：
 
@@ -29,11 +29,23 @@ slice = append(slice, anotherSlice...)
 
 ### 切片：
 
+简单类型的切片也不需要显示赋值，申明即可使用，如：
+
 ~~~go
+var temp []int
+fmt.Println(temp==nil) //true
+temp = append(temp,1)
+fmt.Println(temp,len(temp),cap(temp)) //[1] 1 1
+
+m := make([]int,3)
+fmt.Println(m,len(m),cap(m)) //[0 0 0] 3 3
+m = append(m,1)
+fmt.Println(m,len(m),cap(m)) //[0 0 0 1] 4 6
+
 s := arr[startIndex:endIndex] 
 ~~~
 
-从startIndex~endIndex-1，如果缺省endIndex则表示到最后一个元素
+值得注意的是，以上从startIndex~endIndex-1，如果缺省endIndex则表示到最后一个元素，**如果通过make初始化了切片，并且指定了长度，后续append不管有没有超过初始化的长度，都会扩容。**
 
 ### 类型互相转换
 
