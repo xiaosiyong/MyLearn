@@ -415,3 +415,10 @@ select blocking_pid from sys.schema_table_lock_waits;
   insert/ update / delete
   ~~~
 
+如果表中定义某字段：`b varchar(10) DEFAULT NULL,`假设现在表里面，有 100 万行数据，其中有 10 万行数据的 b 的值是’1234567890’， 假设现在执行语句是这么写的:
+
+~~~mysql
+mysql> select * from table_a where b='1234567890abcd';
+~~~
+
+这条 SQL 语句的执行很慢，流程是这样的：在传给引擎执行的时候，做了字符截断。因为引擎里面这个行只定义了长度是 10，所以只截了前 10 个字节，就是’1234567890’进去做匹配；这样满足条件的数据有 10 万行；因为是 select *， 所以要做 10 万次回表；但是每次回表以后查出整行，到 server 层一判断，b 的值都不是’1234567890abcd’;返回结果是空。
