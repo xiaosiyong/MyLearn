@@ -572,3 +572,5 @@ mysql> insert into query_rewrite.rewrite_rules(pattern, replacement, pattern_dat
 call query_rewrite.flush_rewrite_rules();
 ~~~
 
+
+
