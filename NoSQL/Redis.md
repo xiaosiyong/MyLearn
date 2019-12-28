@@ -1,4 +1,8 @@
-#### Lua管理脚本的四个命令：
+# Redis
+
+## 命令行
+
+### Lua管理脚本的四个命令：
 
 Script Flush  清除服务器中和Lua脚本有关的信息，释放并重建lua_scripts字典，关闭现有的Lua环境并重新创建一个新的Lua环境
 
@@ -8,7 +12,7 @@ Script Load
 
 Script Kill
 
-#### Redis 启动
+### Redis 启动
 
 定位到src   make
 
@@ -20,9 +24,7 @@ redis-cli   slaveof 10.28.51.53 6379  设置slave
 
 Redis-cli  info  显示Redis信息      
 
-
-
-**源码安装redis步骤：**
+## 源码安装redis步骤：
 
 **1、install 源码  make  PREFIX=/usr/loal/redis-4.0.9 install**
 
@@ -128,9 +130,9 @@ Redis 启动
 
 ========================================================================================
 
-#### Redis 两种不同的持久化模式：RDB与AOF
+## Redis 两种不同的持久化模式：RDB与AOF
 
-##### 1、RDB 快照模式，
+### 1、RDB 快照模式，
 
 该模式用于生成某个时间点的备份信息，并且会对当前的key value进行编码存储到rdb文件中。RDB持久化可以**手动**执行，也可以根据服务器配置**定期**执行。RDB持久化所生成的RDB文件是一个经过**压缩**的二进制文件，Redis可以通过这个文件**还原**数据库的数据。
 
@@ -166,7 +168,7 @@ struct redisServer{
 
 ![redissave](../images/redissave.png)
 
-##### 2、AOF 持久化模式，
+### 2、AOF 持久化模式，
 
 该模式类似binlog的形式，会记录服务器所有的写请求，在服务重启的时候通过回放执行命令请求来恢复原有的数据。如图：
 
@@ -202,7 +204,7 @@ AOF持久化功能的实现可以分为3个步骤：
 
 文件同步：考虑是否将内存缓冲区的数据真正写入到硬盘（操作系统在写文件的时候，很多都是先把数据保存在一个内存缓冲区里，等到内存缓冲区满了才将缓冲区的数据写入磁盘）。
 
-##### AOF重写
+### AOF重写
 
 我们写了3条命令，AOF文件就保存了三条命令。如果命令长这样：
 
@@ -228,7 +230,7 @@ integer(4)
 
 ![redisraof](../images/redisraof.png)
 
-##### AOF 后台重写
+### AOF 后台重写
 
 Redis将AOF重写程序放到**子进程**里执行(`BGREWRITEAOF`命令)，像`BGSAVE`命令一样fork出一个子进程来完成重写AOF的操作，从而不会影响到主进程。为了解决数据不一致的问题，Redis服务器设置了一个**AOF重写缓冲区**，这个缓存区会在服务器**创建出子进程之后使用**。如图：
 
@@ -348,7 +350,11 @@ sqlite>select * from memory where type='list' and num_elements > 1000 ;//查询�
 
 缓存、排行榜（京东月度销量榜单，商品按时间的上新排行）、计数器（浏览量、播放量 incr 命令实现计数器功能）、分布式会话、分布式锁（全局ID、减库存、秒杀等场景 setnx功能）、社交网络（点赞、踩、关注……）、最新列表（Redis列表结构，LPUSH可以在列表头部插入一个内容ID作为关键字，LTRIM可用来限制列表的数量，这样列表永远为N个ID，无需查询最新的列表，直接根据ID去到对应的内容页即可）。
 
-#### 常用数据类型：
+---
+
+## 数据类型
+
+### 常用数据类型：
 
 String、Hash、Set、List、SortedSet、pub/sub、Transaction
 
@@ -365,6 +371,16 @@ String、Hash、Set、List、SortedSet、pub/sub、Transaction
 6、pub/sub：发布订阅，类似于消息队列mq。可以选择对某个Key进行订阅，一旦这个key发布了一些消息，则所有订阅了这个Key的对象就可以收到这个消息。主要可以用在实时消息系统上，例如聊天之类的。
 
 7、Transactions：NoSQL不支持事务，但是通过提供了打包执行的功能，即这个包里面的所有命令必须要一起执行，此外还可以锁定某个Key，在打包执行命令时如果检测到这个Key发生了变化，则直接回滚。
+
+### 底层数据结构
+
+1. SDS
+
+---
+
+
+
+
 
 #### Redis对比Memcache
 
