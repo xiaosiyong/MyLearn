@@ -28,4 +28,5 @@ git 有缓冲区的概念，先添加到缓冲区，再提交![gitmanagement](..
 11. git branch -d 分支名  删除分支 -D强制删除 
 12. git commit --amend 修改最近一次提交的commit信息
 13. git rebase -i commitId  基于某个历史的commit修改提交信息，通常commitId选择需要变更的父级commitId
+14. 以上命令合并commit 信息
 
