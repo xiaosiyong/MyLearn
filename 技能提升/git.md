@@ -22,5 +22,10 @@ git 有缓冲区的概念，先添加到缓冲区，再提交![gitmanagement](..
 5. Git checkout -b 分支名 commitId   基于commit创建新的分支
 6. git log --graph  图形化的方式查看log  
 7. git cat-file -t xxxxx    Git 提供的接口查看文件类型（commit，blob，tree）  查看具体内容 -p   三种文件之间的关系![gitfilerelation](../images/gitfilerelation.png)
-8. 
+8. 当出现HEAD detached 时一定要注意关联到某分支，不然容易出现丢失
+9. git checkout -b newBranchName commitId或者分支名  基于commit或者branch创建分支
+10. Head 指针以及其父指针 Head^   git diff Head Head^
+11. git branch -d 分支名  删除分支 -D强制删除 
+12. git commit --amend 修改最近一次提交的commit信息
+13. git rebase -i commitId  基于某个历史的commit修改提交信息，通常commitId选择需要变更的父级commitId
 
