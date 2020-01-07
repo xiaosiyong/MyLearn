@@ -376,11 +376,223 @@ String、Hash、Set、List、SortedSet、pub/sub、Transaction
 
 1. SDS
 
+~~~c
+struct sdshdr{  
+     //记录buf数组中已使用字节的数量  
+     //等于 SDS 保存字符串的长度  
+     int len;  
+     //记录 buf 数组中未使用字节的数量  
+     int free;  
+     //字节数组，用于保存字符串  
+     char buf[];  
+} 
+~~~
+
+C语言处理字符串和数组的成本是很高的，还容易出现以下问题：
+
+- 极其容易造成缓冲区溢出问题，比如用strcat()，在用这个函数之前必须要先给目标变量分配足够的空间，否则就会溢出。
+- 如果要获取字符串的长度，没有数据结构的支撑，可能就需要遍历，它的复杂度是O(N)
+- 内存重分配。C字符串的每次变更(曾长或缩短)都会对数组作内存重分配。同样，如果是缩短，没有处理好多余的空间，也会造成内存泄漏。
+
+基于以上，Redis自己构建了一种名叫Simple dynamic string(SDS)的数据结构，源码如上图。优点：
+
+- 开发者不用担心字符串变更造成的内存溢出问题。
+-  常数时间复杂度获取字符串长度len字段。
+-  空间预分配free字段，会默认留够一定的空间防止多次重分配内存。
+
+2. **链表**
+
+Redis的链表在双向链表上扩展了头、尾节点、元素数等属性。如下图：![redis-linklist](../images/redis-linklist.jpg)
+
+源码：
+
+~~~c
+typedef  struct listNode{  
+       //前置节点  
+       struct listNode *prev;  
+       //后置节点  
+       struct listNode *next;  
+       //节点的值  
+       void *value;    
+}listNode
+
+typedef struct list{  
+     //表头节点  
+     listNode *head;  
+     //表尾节点  
+     listNode *tail;  
+     //链表所包含的节点数量  
+     unsigned long len;  
+     //节点值复制函数  
+     void (*free) (void *ptr);  
+     //节点值释放函数  
+     void (*free) (void *ptr);  
+     //节点值对比函数  
+     int (*match) (void *ptr,void *key);  
+}list; 
+~~~
+
+从上面可以看到，Redis的链表有这几个特点：
+
+1.  可以直接获得头、尾节点。
+2.  常数时间复杂度得到链表长度。
+3.  是双向链表。
+
+3. **字典(Hash)**
+
+Redis的Hash，就是在数组+链表的基础上，进行了一些rehash优化等。![redis-hash](../images/redis-hash.jpg)
+
+源码结构：
+
+~~~c
+//哈希表
+typedef struct dictht {  
+    // 哈希表数组  
+    dictEntry **table;  
+    // 哈希表大小  
+    unsigned long size;  
+    // 哈希表大小掩码，用于计算索引值  
+    // 总是等于 size - 1  
+    unsigned long sizemask;  
+    // 该哈希表已有节点的数量  
+    unsigned long used;  
+} dictht; 
+
+//Hash表节点
+typedef struct dictEntry {  
+    // 键  
+    void *key;  
+    // 值  
+    union {  
+        void *val;  
+        uint64_t u64;  
+        int64_t s64;  
+    } v;  
+    // 指向下个哈希表节点，形成链表  
+    struct dictEntry *next;  // 单链表结构  
+} dictEntry; 
+
+//字典
+typedef struct dict {  
+    // 类型特定函数  
+    dictType *type;  
+    // 私有数据  
+    void *privdata;  
+    // 哈希表  
+    dictht ht[2];  
+    // rehash 索引  
+    // 当 rehash 不在进行时，值为 -1  
+    int rehashidx; /* rehashing not in progress if rehashidx == -1 */  
+} dict; 
+~~~
+
+有源码可以看出：
+
+- Reids的Hash采用链地址法来处理冲突，然后它没有使用红黑树优化。
+- 哈希表节点采用单链表结构。
+- rehash优化
+
+具体优化规则：
+
+- 我们仔细可以看到dict结构里有个字段dictht ht[2]代表有两个dictht数组。第一步就是为ht[1]哈希表分配空间，大小取决于ht[0]当前使用的情况。
+- 将保存在ht[0]中的数据rehash(重新计算哈希值)到ht[1]上。
+- 当ht[0]中所有键值对都迁移到ht[1]后，释放ht[0]，将ht[1]设置为ht[0]，并ht[1]初始化，为下一次rehash做准备。
+
+redis考虑到大量数据迁移带来的cpu繁忙(可能导致一段时间内停止服务)，所以采用了**渐进式rehash**的方案。步骤如下
+
+- 为ht[1]分配空间，同时持有两个哈希表(一个空表、一个有数据)。
+- 维持一个技术器rehashidx，初始值0。
+-  每次对字典增删改查，会顺带将ht[0]中的数据迁移到ht[1],rehashidx++(注意：ht[0]中的数据是只减不增的)。
+- 直到rehash操作完成，rehashidx值设为-1。
+
+它的好处：采用分而治之的思想，将庞大的迁移工作量划分到每一次CURD中，避免了服务繁忙。
+
+4. 跳跃表
+
+**skipList & AVL 之间的选择**
+
+1. 从算法实现难度上来比较，skiplist比平衡树要简单得多。
+2.  平衡树的插入和删除操作可能引发子树的调整，逻辑复杂，而skiplist的插入和删除只需要修改相邻节点的指针，操作简单又快速。
+3.  查找单个key，skiplist和平衡树的时间复杂度都为O(log n)，大体相当。
+4.  在做范围查找的时候，平衡树比skiplist操作要复杂。
+5.  skiplist和各种平衡树（如AVL、红黑树等）的元素是有序排列的。
+
+可以看到，skipList中的元素是有序的，所以跳跃表在redis中用在**有序集合键、集群节点内部数据结构。**
+
+源码：
+
+~~~c
+//跳跃表节点
+typedef struct zskiplistNode {  
+    // 后退指针  
+    struct zskiplistNode *backward;  
+    // 分值  
+    double score;  
+    // 成员对象  
+    robj *obj;  
+    // 层  
+    struct zskiplistLevel {  
+        // 前进指针  
+        struct zskiplistNode *forward;  
+        // 跨度  
+        unsigned int span;  
+    } level[];  
+} zskiplistNode;
+
+//跳跃表
+typedef struct zskiplist {  
+    // 表头节点和表尾节点  
+    struct zskiplistNode *header, *tail;  
+    // 表中节点的数量  
+    unsigned long length;  
+    // 表中层数最大的节点的层数  
+    int level;  
+} zskiplist; 
+~~~
+
+层：也就是level[]字段，层的数量越多，访问节点速度越快。(因为它相当于是索引，层数越多，它索引就越细，就能很快找到索引值)
+
+前进指针：层中有一个forward字段，用于从表头向表尾方向访问。
+
+跨度（span）：用于记录两个节点之间的距离。
+
+后退指针：用于从表尾向表头方向访问。
+
+5. 整数集合
+
+Reids对整数存储专门作了优化，intset就是redis用于保存整数值的集合数据结构，可以保存类型为int16_t、int32_t、int64_t的整数值，并且保证集合中不会出现重复元素。当一个结合中只包含整数元素，而且数量不多时，redis就会用这个来存储。
+
+~~~c
+typedef struct intset {
+    // 编码方式
+    uint32_t encoding;
+    // 集合包含的元素数量
+    uint32_t length;
+    // 保存元素的数组
+    int8_t contents[];
+} intset;
+~~~
+
+- `contents`数组：整数集合的每个元素在数组中按值的大小从小到大排序，且不包含重复项
+- length`记录整数集合的元素数量，即contents数组长度`
+- encoding`决定contents数组的真正类型，如INTSET_ENC_INT16、INTSET_ENC_INT32、INTSET_ENC_INT64
+
+~~~shell
+127.0.0.1:6379[2]> sadd number -6370 -5 18 233 14672
+(integer) 5  
+127.0.0.1:6379[2]> object encoding number  
+"intset" 
+~~~
+
+![redisintset](../images/redisintset.png)
+
+6. 压缩列表**ziplist**
+
+ziplist是redis为了节约内存而开发的顺序型数据结构。它被用在列表键和哈希键中。一般用于小数据存储。
+
+7. 快速列表 **quicklist**
+
 ---
-
-
-
-
 
 #### Redis对比Memcache
 
