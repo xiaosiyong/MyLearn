@@ -673,11 +673,11 @@ Redis采用的是**惰性删除+定期删除**两种策略，所以说，在Redi
 #### Redis数据淘汰策略
 
 - **volatile-lru**，从已设置过期时间的数据集（server.db[i].expires）中挑选最近最少使用的数据淘汰
-- **volatile-ttl**，从已设置过期时间的数据集（server.db[i].expires）中挑选将要过期的数据淘汰
+- **volatile-ttl**，从已设置过期时间的数据集（server.db[i].expires）中挑选将要过期的数据淘汰，优先删除剩余时间(time to live,TTL) 短的key。
 - **volatile-random**，从已设置过期时间的数据集（server.db[i].expires）中任意选择数据淘汰
 - **allkeys-lru**，从数据集（server.db[i].dict）中挑选最近最少使用的数据淘汰
 - **allkeys-random**，从数据集（server.db[i].dict）中任意选择数据淘汰
-- **no-enviction（默认使用的策略）**，（驱逐）：禁止驱逐数据
+- **no-enviction（默认使用的策略）**，（驱逐）：禁止驱逐数据 不删除策略, 达到最大内存限制时, 如果需要更多内存, 直接返回错误信息。
 
 Redis回收使用的算法：**LRU 算法**
 
@@ -727,3 +727,4 @@ redis keys指令遍历会阻塞，可以用scan代替，但是会有重复的，
 - I/O多路复用的特点是通过一种机制**一个进程能同时等待多个文件描述符**，而这些文件描述符其中的任意一个进入**读就绪状态、等等**，`select()`函数就可以返回。
 - select/epoll的优势并不是对于单个连接能处理得更快，而是**在于能处理更多的连接**。
 
+#### BitMap以及HyperLogLog的应用

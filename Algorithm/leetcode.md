@@ -94,7 +94,7 @@ func partition(nums []int,l,h int)int{
 }
 ~~~
 
-## 2、数组中的第K个最大元素
+### 2、数组中的第K个最大元素
 
 在未排序的数组中找到第 k 个最大的元素。请注意，你需要找的是数组排序后的第 k 个最大的元素，而不是第 k 个不同的元素。[215. 数组中的第K个最大元素](https://leetcode-cn.com/problems/kth-largest-element-in-an-array/)
 
@@ -161,5 +161,24 @@ func quickSelect(nums []int,s,e,k int)int{
 	}
 
 }
+~~~
+
+### 3、两数之和
+
+给定一个整数数组 nums 和一个目标值 target，请你在该数组中找出和为目标值的那 两个 整数，并返回他们的数组下标。
+
+你可以假设每种输入只会对应一个答案。但是，你不能重复利用这个数组中同样的元素。
+
+示例:
+
+l给定 nums = [2, 7, 11, 15], target = 9
+
+因为 nums[0] + nums[1] = 2 + 7 = 9
+所以返回 [0, 1]
+
+要求时间复杂度不超过O(n)
+
+~~~go
+
 ~~~
 
