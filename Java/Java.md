@@ -96,3 +96,18 @@ JVM 中，具体执行垃圾回收的垃圾回收器有四种:
  StackOverflowError，是线程栈空间不足，栈空间不足通常是因为方法调用的层次太多，导致栈帧太多。我们可以先通过栈异常信息观察是否存在错误的递归调用，因为每次递归都会使嵌套方法调用更深入一层。如果调用是正常的，可以尝试调整 -Xss 参数增加栈空间大小。
 
 如果程序运行卡顿，部分请求响应延迟比较厉害，那么可以通过 jstat 命令查看垃圾回收器的运行状况，是否存在较长时间的 FullGC，然后调整垃圾回收器的相关参数，使垃圾回收对程序运行的影响尽可能小。
+
+### Q1：JVM 是一个进程，JVM 上跑 Tomcat，Tomcat 上可以部署多个应用。这样的话，每个跑在 Tomcat 上的应用是一个线程吗？该怎么理解“如果一个应用 crash 了，其他应用也会 crash”？
+
+我们用 Java 开发 Web 应用，开发完成，编译打包以后得到的是一个 war 包，这个 war 包放入 Tomcat 的应用程序路径下，启动 Tomcat 就可以通过 HTTP 请求访问这个 Web 应用了。
+
+首先，我们是通过执行 Tomcat 的 Shell 脚本启动 Tomcat 的，而在 Shell 脚本里，其实启动的是 Java 虚拟机，大概是这样一个 Shell 命令：`java org.apache.catalina.startup.Bootstrap "$@" start `
+
+所以我们在 Linux 操作系统执行 Tomcat 的 Shell 启动脚本，Tomcat 启动以后，其实在操作系统里看到的是一个 JVM 虚拟机进程。这个虚拟机进程启动以后，加载 class 进来执行，首先加载的就这个org.apache.catalina.startup.Bootstrap类，这个类里面有一个main()函数，是整个 Tomcat 的入口函数，JVM 虚拟机会启动一个主线程从这个入口函数开始执行。
+
+主线程从 Bootstrap 的 main() 函数开始执行，初始化 Tomcat 的运行环境，这时候就需要创建一些线程，比如负责监听 80 端口的线程，处理客户端连接请求的线程，以及执行用户请求的线程。创建这些线程的代码是 Tomcat 代码的一部分。初始化运行环境之后，Tomcat 就会扫描 Web 程序路径，扫描到开发的 war 包后，再加载 war 包里的类到 JVM。因为 Web 应用是被 Tomcat 加载运行的，所以我们也称 Tomcat 为 Web 容器。
+
+如果有外部请求发送到 Tomcat，也就是外部程序通过 80 端口和 Tomcat 进行 HTTP 通信的时候，Tomcat 会根据 war 包中的 web.xml 配置，决定这个请求 URL 应该由哪个 Servlet 处理，然后 Tomcat 就会分配一个线程去处理这个请求，实际上，就是这个线程执行相应的 Servlet 代码。我们回到小美同学的问题，Tomcat 启动的时候，启动的是 JVM 进程，这个进程首先是执行 JVM 的代码，而 JVM 会加载 Tomcat 的 class 执行，并分配一个主线程，这个主线程会从 main 函数开始执行。
+
+在主线程执行过程中，Tomcat 的代码还会启动其他一些线程，包括处理 HTTP 请求的线程。而我们开发的应用是一些 class，被 Tomcat 加载到这个 JVM 里执行，所以，即使这里有多个应用被加载，也只是加载了一些 class，我们的应用被加载进来以后，并没有增加 JVM 进程中的线程数，也就是 web 应用本身和线程是没有关系的。而 Tomcat 会根据 HTTP 请求 URL 执行应用中的代码，这个时候，可以理解成每个请求分配一个线程，每个线程执行的都是我们开发的 Web 代码。如果 Web 代码中包含了创建新线程的代码，To
+
