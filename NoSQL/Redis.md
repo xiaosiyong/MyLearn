@@ -813,3 +813,24 @@ set 也是存储了一个集合列表功能。和 list 不同，set 具备去重
 
 ![redis-set](../images/redis-set)
 
+set集合特殊的操作命令
+
+setA={A,B,C} setB = {B, C}
+
+1）集合与集合之间的交集   sinter setA setB－－>得到集合{B,C}
+
+2) 集合与集合之间的并集     sunion setA setB －－>得到集合{A,B,C}
+
+3）集合与集合之间的差集   sdiff setA setB－－>得到集合{A}
+
+另外，利用Redis的Set可以实现类似微博的关系设计，如图：
+
+![redis-set-weibo](../images/redis-set-weibo)
+
+##### 2.5 **Zset有序集合**
+
+常用于排行榜，如视频网站需要对用户上传视频做排行榜，或点赞数与集合有联系，不能有重复的成员。如下图：
+
+![redis-zset-1](../images/redis-zset-1)
+
+![redis-zset-2](../images/redis-zset-2)
