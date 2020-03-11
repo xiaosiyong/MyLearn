@@ -716,8 +716,6 @@ redis的一些特性在分区方面表现的不是很好：
 
 lua脚本可以同时把setnx和expire合成一条指令来用的，这样不会出现setnx expire之前宕机死锁的问题
 
-
-
 redis keys指令遍历会阻塞，可以用scan代替，但是会有重复的，需要客户端去重。Redis队列，一般使用list结构作为队列，rpush生产消息，lpop消费消息。当lpop没有消息的时候，要适当sleep一会再重试。list还有个指令叫blpop，在没有消息的时候，它会阻塞住直到消息到来。redis 通过 sortedset 可实现延时队列。拿时间戳作为score，消息内容作为key调用zadd来生产消息，消费者用zrangebyscore指令获取N秒之前的数据轮询进行处理。
 
 #### Redis单线程为什么快？
@@ -728,3 +726,90 @@ redis keys指令遍历会阻塞，可以用scan代替，但是会有重复的，
 - select/epoll的优势并不是对于单个连接能处理得更快，而是**在于能处理更多的连接**。
 
 #### BitMap以及HyperLogLog的应用
+
+### Redis面试必备
+
+#### 1、常用指令![redis-command-often](../images/redis-command-often.png)
+
+#### 2、场景解析
+
+##### 2.1 String 
+
+如图：![redis-command-often](../images/redis-command-often.png)
+
+String类型使用场景
+
+**场景一：商品库存数**
+
+从业务上，商品库存数据是热点数据，交易行为会直接影响库存。而 Redis 自身 String 类型提供了：
+
+1. set goods_id 10; 设置 id 为 good_id 的商品的库存初始值为 10；
+2. decr goods_id; 当商品被购买时候，库存数据减 1。
+
+**依次类推的场景：**商品的浏览次数，问题或者回复的点赞次数等。这种计数的场景都可以考虑利用 Redis 来实现。
+
+**场景二：时效信息存储**
+
+Redis 的数据存储具有自动失效能力。也就是存储的 key-value 可以设置过期时间：set(key, value, expireTime)。
+
+比如，用户登录某个 App 需要获取登录验证码， 验证码在 30 秒内有效。那么我们就可以使用 String 类型存储验证码，同时设置 30 秒的失效时间。
+
+![redis-string-scence](../images/redis-string-scence)
+
+##### 2.2 Hash存储
+
+![redis-hash-save](../images/redis-hash-save))
+
+Hash 类型使用场景
+
+Redis 在存储对象（例如：用户信息）的时候需要对对象进行序列化转换然后存储。还有一种形式，就是将对象数据转换为 JSON 结构数据，然后存储 JSON 的字符串到 Redis。对于一些对象类型，还有一种比较方便的类型，那就是按照 Redis 的 Hash 类型进行存储。
+
+例如，我们存储一些网站用户的基本信息， 我们可以使用：这样就存储了一个用户基本信息，存储信息有：{name : 小明， phone : “123456”，sex : “男”}当然这种类似场景还非常多， 比如存储订单的数据，产品的数据，商家基本信息等。
+
+Hash实现信息存储的优缺点
+
+1. 原生:
+
+- set user: 1:name james; 
+- set user:1:age 23;
+- set user:1:sex boy;
+
+**优点:**简单直观，每个键对应一个值 **缺点:**键数过多，占用内存多，用户信息过于分散，不用于生产环境 
+
+2. 将对象序列化存入
+
+redis set user:1 serial ize (userInfo);
+
+**优点:**编程简单，若使用序列化合理内存使用率高 **缺点:**序列化与反序列化有一定开销，更新属性时需要把userInfo全取出来进行反序列化，更新后再序列化到redis
+
+3. hash存储
+
+hmset user:1 name james age 23 sex boy 
+
+**优点:**简单直观，使用合理可减少内存空间消耗 **缺点:**要控制ziplist 与hashtable两种编码转换，Mhashtable会消耗更多内存。 
+
+##### 2.3 List类型及使用场景
+
+list 是按照插入顺序排序的字符串链表。可以在头部和尾部插入新的元素（双向链表实现，两端添加元素的时间复杂度为 O(1)） 。![redis-list](../images/redis-list)
+
+**场景一：消息队列实现**
+
+目前有很多专业的消息队列组件 Kafka、RabbitMQ 等。 我们在这里仅仅是使用 list 的特征来实现消息队列的要求。在实际技术选型的过程中，大家可以慎重思考。
+
+**list 存储就是一个队列的存储形式：**
+
+1. lpush key value; 在 key 对应 list 的头部添加字符串元素；
+2. rpop key;移除列表的最后一个元素，返回值为移除的元素。
+
+**场景二：最新上架商品**
+
+在交易网站首页经常会有新上架产品推荐的模块， 这个模块是存储了最新上架前 100 名。这时候使用 Redis 的 list 数据结构，来进行 TOP 100 新上架产品的存储。Redis ltrim 指令对一个列表进行修剪（trim），这样 list 就会只包含指定范围的指定元素。start 和 stop 都是由 0 开始计数的，这里的 0 是列表里的第一个元素（表头），1 是第二个元素。
+
+##### 2.4 **set 类型使用场景**
+
+set 也是存储了一个集合列表功能。和 list 不同，set 具备去重功能。当需要存储一个列表信息，同时要求列表内的元素不能有重复，这时候使用 set 比较合适。与此同时，set 还提供的交集、并集、差集。
+
+例如，在交易网站，我们会存储用户感兴趣的商品信息，在进行相似用户分析的时候， 可以通过计算两个不同用户之间感兴趣商品的数量来提供一些依据。获取到两个用户相似的产品， 然后确定相似产品的类目就可以进行用户分析。类似的应用场景还有， 社交场景下共同关注好友， 相似兴趣 tag 等场景的支持。
+
+![redis-set](../images/redis-set.png)
+
