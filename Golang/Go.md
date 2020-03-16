@@ -2,6 +2,8 @@
 
 Go中位运算优先级高于 +-*/,这点跟Java不一样，Java中+-*/ 优先级高于位运算。
 
+比较好的框架![golang-framework](../images/golang-framework.png)
+
 ### 数组
 
 数组的初始化 **var array [5]int **，go 语言初始化时，会使用对应的零值来给元素初始化。数组不需要显示初始化；数组的零值是一个随时能用的本身就为零值的数组：例如以上的array现在是5个值都为0的一个数组。快速创建：array := [5]int{1,2,3,4,5} 或者 array := [...]int{1,2,3}；声明并给指定元素赋值：array := [5]int{1: 10, 2: 20}。
@@ -47,7 +49,17 @@ fmt.Println(m,len(m),cap(m)) //[0 0 0 1] 4 6
 s := arr[startIndex:endIndex] 
 ~~~
 
-值得注意的是，以上从startIndex~endIndex-1，如果缺省endIndex则表示到最后一个元素，**如果通过make初始化了切片，并且指定了长度，后续append不管有没有超过初始化的长度，都会扩容。**
+值得注意的是，以上从startIndex~endIndex-1，如果缺省endIndex则表示到最后一个元素，**如果通过make初始化了切片，并且指定了长度，后续append不管有没有超过初始化的长度，都会扩容。**如下：
+
+~~~go
+	s1 := make([]int,5)
+	fmt.Printf("addr:%p \t\tlen:%v content:%v\n",s1,len(s1),s1)
+
+	s1 = append(s1, 1)
+	fmt.Printf("addr:%p \t\tlen:%v content:%v\n",s1,len(s1),s1)
+	//addr:0xc00007e060               len:5 content:[0 0 0 0 0]
+	//addr:0xc000092000               len:6 content:[0 0 0 0 0 1]
+~~~
 
 ### 类型互相转换
 
@@ -351,7 +363,7 @@ fmt.PrintLn(string(-1))//�
 
 
 
-Go语言切片类型属于引用类型，同属于引用类型的还有字典类型、通道类型、函数类型；数组属于值类型，同属于值类型的有基础数据类型及结构体类型。
+Go语言切片类型属于引用类型，同属于引用类型的还有**字典类型、通道类型、函数**类型；数组属于值类型，同属于值类型的有基础数据类型及结构体类型。 切片在初始化时，如果没有指定其容量，那么其容量跟长度是一样的。如果在初始化时指明了容量，那么切片的实际容量也就是它了。
 
 ~~~go
   slice1 := []int{0,1,2,3,4,5,6}
@@ -360,6 +372,8 @@ Go语言切片类型属于引用类型，同属于引用类型的还有字典类
 	slice2 := slice1[3:6]
 	fmt.Println("slice2 length:",len(slice2),",slice2 cap:",cap(slice2))
   //输出：slice2 length: 3 ,slice2 cap: 4
+	s1 := make([]int, 5)
+	s2 := make([]int, 5,8)
 ~~~
 
 更通用的规则是：一个切片的容量可以被看作是透过这个窗口最多可以看到的底层数组中元素的个数。S4是通过在S3shang施加切片操作得来的，所以S3d底层数组就是S4的底层数组。在底层数组不变的情况下，切片代表的窗口可以向右扩展，直至其底层数组的末尾。注意，**切片代表的窗口是无法向左扩展的**。

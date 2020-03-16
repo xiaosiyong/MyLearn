@@ -1,3 +1,13 @@
-#### gRPC简介
+# gRPC简介
 
 gRPC是一个高性能、开源和通用的RPC框架，面向服务端和移动端，基于HTTP/2设计。
+
+### RPC原理
+
+RPC 框架的目标就是让远程服务调用更加简单、透明，RPC 框架负责屏蔽底层的传输方式（TCP 或者 UDP）、序列化方式（XML/Json/ 二进制）和通信细节。服务调用者可以像调用本地接口一样调用远程的服务提供者，而不需要关心底层通信细节和调用过程。
+
+原理如图：
+
+![grpc-1](/Users/iss/xiaosy/MyLearn/images/grpc-1.png)
+
+gRPC与Thrift
