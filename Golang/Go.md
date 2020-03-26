@@ -1325,7 +1325,7 @@ Golang中经历的几个过程：
 1. go的垃圾回收有个触发阈值，这个阈值会随着每次内存使用变大而逐渐增大（如初始阈值是10MB则下一次就是20MB，再下一次就成为了40MB…），如果长时间没有触发gc go会主动触发一次（2min）。高峰时内存使用量上去后，除非持续申请内存，靠阈值触发gc已经基本不可能，而是要等最多2min主动gc开始才能触发gc。
 2. go语言在向系统交还内存时只是告诉系统这些内存不需要使用了，可以回收；同时操作系统会采取“拖延症”策略，并不是立即回收，而是等到系统内存紧张时才会开始回收这样该程序又重新申请内存时就可以获得极快的分配速度。
 
-调优：
+调优经验：
 
 1、硬性参数	涉及算法的问题，总是会有些参数。GOGC参数主要控制的是**下一次gc开始的时候的内存使用量**。比如当前的程序使用了4M的对内存（这里说的是**堆内存**），即是说程序当前reachable的内存为4m，当程序占用的内存达到reachable*(1+GOGC/100)=8M的时候，gc就会被触发，开始进行相关的gc操作。如何对GOGC的参数进行设置，要根据生产情况中的实际场景来定，比如GOGC参数提升，来减少GC的频率。
 
@@ -1352,4 +1352,68 @@ b := make([]int, 1024)   b = append(b, 99)   fmt.Println("len:", len(b), "cap:",
 ~~~
 
 在使用了append操作之后，数组的空间由1024增长到了1312，所以如果能提前知道数组的长度的话，最好在最初分配空间的时候就做好空间规划操作，会增加一些代码管理的成本，同时也会降低gc的压力，提升代码的效率。
+
+过程：
+
+查看gc 是否有异常，我们可以使用 gctrace 跟踪实时的gc 。执行下面命令可以看到gc 的实时信息，
+
+~~~go
+GODEBUG=gctrace=1 go run cmd/agent_bin.go
+~~~
+
+运行结果：
+
+~~~go
+gc 45 @37.801s 11%: 0.19+627+0.29 ms clock, 0.38+424/621/0+0.59 ms cpu, 356->415->225 MB, 453 MB goal, 4 P
+gc 46 @39.126s 11%: 2.9+927+0.16 ms clock, 5.8+342/925/0+0.33 ms cpu, 361->460->275 MB, 450 MB goal, 4 P
+gc 47 @40.847s 12%: 0.24+1096+0.12 ms clock, 0.49+291/1007/0+0.24 ms cpu, 427->559->319 MB, 551 MB goal, 4 P
+gc 48 @42.771s 12%: 0.26+841+0.12 ms clock, 0.52+377/830/0+0.24 ms cpu, 486->561->271 MB, 638 MB goal, 4 P
+gc 49 @44.429s 12%: 3.1+890+0.40 ms clock, 6.2+492/833/0+0.81 ms cpu, 440->528->294 MB, 543 MB goal, 4 P
+gc 50 @46.188s 12%: 0.23+1165+0.13 ms clock, 0.47+624/1158/0+0.27 ms cpu, 471->579->323 MB, 589 MB goal, 4 P
+gc 51 @48.252s 13%: 0.26+1410+0.14 ms clock, 0.52+358/1336/9.9+0.28 ms cpu, 506->620->343 MB, 646 MB goal, 4 P
+gc 52 @50.942s 13%: 0.27+806+0.51 ms clock, 0.55+403/805/200+1.0 ms cpu, 549->657->340 MB, 687 MB goal, 4 P
+gc 53 @53.014s 13%: 0.10+857+0.36 ms clock, 0.21+467/851/94+0.73 ms cpu, 546->666->351 MB, 681 MB goal, 4 P
+~~~
+
+gc 45：表示第45次GC，共有4个P (线程)参与GC。
+
+11%: 表示gc 占时间比。
+
+0.19+627+0.29 us：STW（stop-the-world）0.19ms, 并发标记和扫描的时间627ms, STW标记的时间0.29ms。
+
+0.38+424/621/0+0.59 ms cpu, 表示垃圾回收占用cpu时间
+
+356->415->225 MB, 453 MB goal,表示堆的大小，gc后堆的大小，存活堆的大小
+
+453 MB goal 表示整体堆的大小为435M。
+
+~~~go
+gc 1405 @6.068s 11%: 0.058+1.2+0.083 ms clock, 0.70+2.5/1.5/0+0.99 ms cpu, 7->11->6 MB, 10 MB goal, 12 P
+
+// General
+gc 1404     : The 1404 GC run since the program started
+@6.068s     : Six seconds since the program started
+11%         : Eleven percent of the available CPU so far has been spent in GC
+
+// Wall-Clock
+0.058ms     : STW        : Mark Start       - Write Barrier on
+1.2ms       : Concurrent : Marking
+0.083ms     : STW        : Mark Termination - Write Barrier off and clean up
+
+// CPU Time
+0.70ms      : STW        : Mark Start
+2.5ms       : Concurrent : Mark - Assist Time (GC performed in line with allocation)
+1.5ms       : Concurrent : Mark - Background GC time
+0ms         : Concurrent : Mark - Idle GC time
+0.99ms      : STW        : Mark Term
+
+// Memory
+7MB         : Heap memory in-use before the Marking started
+11MB        : Heap memory in-use after the Marking finished
+6MB         : Heap memory marked as live after the Marking finished
+10MB        : Collection goal for heap memory in-use after Marking finished
+
+// Threads
+12P         : Number of logical processors or threads used to run Goroutines
+~~~
 

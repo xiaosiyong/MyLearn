@@ -39,3 +39,22 @@ git 有缓冲区的概念，先添加到缓冲区，再提交![gitmanagement](..
 ![gitxieyi](../images/gitxieyi.png)
 
 ![gitbak](../images/gitbak.png)
+
+### GIthub
+
+git上开源项目的组成部分：
+
+- name: 项目名
+- description: 项目的简要描述
+- 项目的源码
+- README.md: 项目的详细情况的介绍
+
+那么除了这些要素之外，项目本身的`star`数和`fork`数，也是评判一个开源项目是否火热的标准，这同时也是一个很重要的搜索标准。另外我们也要注意观察这个项目的最近更新日期，因为项目越活跃，那么它的更新日期也更加频繁。以上要素就是我们在进行搜索的时候要注意的一些关键点。
+
+常规：
+
+1. 直接关键字搜索	假设我们现在要搜索`React`,相信大部分小伙伴都是直接在搜索框里输入：“React”，然后一回车；
+2. 按项目名搜           搜索`项目名`里面包含`React`的项目:**in:name React**，也可以加star **in:name React stars:>5000**
+3. 还可以附带其他条件  如：**in:name React stars:>5000 forks:>3000**
+4. 同理还可以在 description里，readme里 按以上条件搜 **in:readme React stars:>3000 forks:>3000** ，**in:description 微服务 language:python** 同时还可以带上日期：**in:description 微服务 language:python pushed:>2020-01-01**
+
