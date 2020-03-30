@@ -1417,3 +1417,4 @@ gc 1404     : The 1404 GC run since the program started
 12P         : Number of logical processors or threads used to run Goroutines
 ~~~
 
+Go Module模式下编译：进入到项目所在目录，go install ./... 即可
