@@ -1,6 +1,10 @@
-#### Kafka是什么？
+# Kafka相关
 
 ![kafka](../images/kafka学习导图.jpg)
+
+
+
+## Kafka是什么？
 
 Apache Kafka 是一款开源的消息引擎系统，消息引擎系统是一组规范。企业利用这组规范在不同系统之间传递语义准确的消息，实现松散耦合的异步式数据传递。
 
@@ -26,9 +30,21 @@ Kafka的点对点消息模型，指同一条消息只能被下游的一个消费
 
  如果producer指定了要发送的目标分区，消息自然是去到那个分区；否则就按照producer端参数partitioner.class指定的分区策略来定；如果你没有指定过partitioner.class，那么默认的规则是：看消息是否有key，如果有则计算key的murmur2哈希值%topic分区数；如果没有key，按照轮询的方式确定分区。
 
+## Kafka相关概念
 
+- Broker：Kafka 集群中包含的服务器。
+- Producer：消息生产者。
+- Consumer：消息消费者。
+- Consumer Group：每个 Consumer 都属于一个 Consumer Group，每条消息只能被 Consumer Group 中的一个 Consumer 消费，但可以被多个 Consumer Group 消费。
+- Topic：消息的类别。每条消息都属于某个 Topic，不同的 Topic 之间是相互独立的，即 Kafka 是面向 Topic 的。
+- Partition：每个 Topic 分为多个 Partition，Partition 是 Kafka 分配的单位。Kafka 物理上的概念，相当于一个目录，目录下的日志文件构成这个 Partition。
+- Replica：Partition 的副本，保障 Partition 的高可用。
+- Leader：Replica 中的一个角色， Producer 和 Consumer 只跟 Leader 交互。
+- Follower：Replica 中的一个角色，从 Leader 中复制数据。
+- Controller：Kafka 集群中的其中一个服务器，用来进行 Leader Election 以及各种 Failover。
+- Zookeeper：Kafka 通过 Zookeeper 来存储集群的 Meta 信息。
 
-#### 压缩算法
+## 压缩算法
 
 Kafka的消息层次分为两层，消息集合(message set)以及消息(message)。一个消息集合中包含若干条日志项(record item)，而日志项才是封装消息的地方。Kafka底层的消息日志由一些列消息集合日志项组成，通常不会直接操作具体的一条条消息，总是在消息集合这个层面上进行写入操作。
 
