@@ -66,5 +66,7 @@ Command I 反向蒙版
 
 
 
+### 部分污点清除
 
+修补工具勾上，shift+f5,然后点内容识别就好了![pscleardemo](../images/pscleardemo.png)
 

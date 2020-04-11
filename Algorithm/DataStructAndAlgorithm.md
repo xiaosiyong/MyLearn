@@ -848,6 +848,67 @@ public void delete(int data) {
 
 红黑树是一种平衡二叉查找树。它是为了解决普通二叉查找树在数据更新的过程中，复杂度退化的问题而产生的。红黑树的高度近似 log2n，所以它是近似平衡，插入、删除、查找操作的时间复杂度都是 O(logn)。因为红黑树是一种性能非常稳定的二叉查找树，所以，在工程中，但凡是用到动态插入、删除、查找数据的场景，都可以用到它。不过，它实现起来比较复杂，如果自己写代码实现，难度会有些高，这个时候，我们其实更倾向用跳表来替代它。
 
+#### 红黑树的基本操作：旋转与反色
+
+旋转：逆时针旋转称为左旋，顺时针旋转称为右旋。红黑树的旋转操作是为了在保证二叉搜索树和红黑树的性质的前提下，来转换红链接的位置。
+
+![rbtree-rotate-1-2](../images/rbtree-rotate-1-2.png)
+
+可以看出顺时针旋转就是将节点的左儿子提上来，将自己变做它的右儿子，将左儿子的右子树接到自己的左子树中，同时转变红链接。可以将其想象成把`4->2`这条边顺时针旋转了一下。逆时针旋转也是类似的做法。同时顺时针旋转和逆时针旋转可以视为一对逆操作，因为一次左旋和一次右旋可以变回原来的样子。
+
+~~~python
+# 顺时针旋转
+def cw_rotate(h):
+    assert h is not None and h.left is red  # h是非空节点并且左儿子为红色
+
+    x = h.left
+    h.left = x.right
+    x.right = h
+    x.color = h.color
+    h.color = red
+
+    return x  # 返回被提上来的左儿子
+
+# 逆时针旋转
+def ccw_rotate(h):
+    assert h is not None and h.right is red  # h是非空节点并且左儿子为红色
+
+    x = h.right
+    h.right = x.left
+    x.left = h
+    x.color = h.color
+    h.color = red
+
+    return x  # 返回被提上来的左儿子
+
+h = cw_rotate(h)  # 将h顺时针旋转
+~~~
+
+反色：如同在2-3树中一样，红黑树要能够处理4-节点。对于4-节点，我们只有两种操作：合成一个4-节点和分解一个4-节点。
+
+![rbtree-flip-1](../images/rbtree-flip-1.png)
+
+对照一下2-3树，这个操作就显而易见了。
+
+![rbtree-flip-2-2](../images/rbtree-flip-2-2.png)
+
+反色操作会将两个儿子的父节点变为红色，是因为在2-3树中，中间取出来的键要向上传递并结合进去。此外，反色操作会导致出现右边的红链接，然而这没有关系，因为4-节点是临时的，我们最终会通过逆时针旋转将其变为左边的红链接或者再次反色将这个4-节点分解。
+
+~~~python
+def flip_color(h):
+    assert h.color is different from h.children.color  # h的颜色和它的儿子相反
+
+    h.color = (h.color == RED ? BLACK : RED)
+    h.left.color = (h.left.color == RED ? BLACK : RED)
+    h.right.color = (h.right.color == RED ? BLACK : RED)
+
+    return h
+
+h = flip_color(h)  # 将h反色
+~~~
+
+详细可见此处：https://riteme.site/blog/2016-3-12/2-3-tree-and-red-black-tree.html
+
 #### 支持动态查找的数据结构对比：
 
 散列表：插入删除查找都是O(1), 是最常用的，但其缺点是不能顺序遍历以及扩容缩容的性能损耗。适用于那些不需要顺序遍历，数据更新不那么频繁的。
