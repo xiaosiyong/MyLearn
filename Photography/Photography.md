@@ -70,3 +70,26 @@ Command I 反向蒙版
 
 修补工具勾上，shift+f5,然后点内容识别就好了![pscleardemo](../images/pscleardemo.png)
 
+
+
+1、找出令你心动的点
+
+2、观察、思考、再观察
+
+3、熟悉器材
+
+![pslesson1](../images/pslesson1.png)
+
+4、好照片要有主题
+
+![pslesson1](../images/pslesson2.png)
+
+![pslesson3](../images/pslesson3.png)
+
+![psless4](../images/psless3.png)
+
+![pslesson4](../images/pslesson4.png)
+
+![pslesson5](../images/pslesson5.png)
+
+![pslesson6](../images/pslesson6.png)
