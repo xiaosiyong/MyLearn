@@ -111,6 +111,10 @@ i := &v
 
 上述代码片段中的两种不同初始化方法其实是等价的，它们都会创建一个指向 `int` 零值的指针。
 
+在编译期间的类型检查阶段，Go 语言就将代表 `make` 关键字的 `OMAKE` 节点根据参数类型的不同转换成了 `OMAKESLICE`、`OMAKEMAP` 和 `OMAKECHAN` 三种不同类型的节点，这些节点会调用不同的运行时函数来初始化相应的数据结构。
+
+对于new关键字，编译器会在中间代码生成
+
 ### Interface 
 
 接口类型检测：
@@ -279,7 +283,9 @@ func main() {
 }
 ```
 
+### Panic 和 Recover
 
+panic 能改变程序的控制流，函数调用panic 时会立刻停止执行函数的其他代码，并在执行结束后在当前Goroutine中递归执行调用方的延迟函数调用defer，recover` 可以中止 `panic` 造成的程序崩溃。它是一个只能在 `defer` 中发挥作用的函数，在其他作用域中调用不会发挥任何作用。
 
 #### defer问题
 
@@ -1270,9 +1276,11 @@ sync.Map内部大量使用了原子操作来存取键和值，并使用了两个
 
 一个进程可以创建和销毁多个线程，同时一个进程中的多个线程可以并发执行。一个程序至少有一个进程，一个进程至少有一个线程。
 
-并发：一个CPU上，比如说有10个线程，每个线程执行10毫秒，从我们的角度看，这10个线程似乎同时在运行，但实际上某个时间点只有一个线程在运行，这是并发。
+并发：一个CPU上，比如说有10个线程，每个线程执行10毫秒，从我们的角度看，这10个线程似乎同时在运行，但实际上某个时间点只有一个线程在运行，这是并发。Concurrency
 
-并行：如果有10个CPU，10个线程，这10个线程运行在不同的CPU上，互不干扰就是并行。
+并行：如果有10个CPU，10个线程，这10个线程运行在不同的CPU上，互不干扰就是并行。Parallelism
+
+![concurrencyandparallelism](../images/concurrencyandparallelism.png)
 
 **协程**是一种用户态的轻量级线程，协程的调度完全由用户控制（进程和线程都是由cpu 内核进行调度）。协程拥有自己的寄存器上下文和栈。协程调度切换时，将寄存器上下文和栈保存到其他地方，在切回来的时候，恢复先前保存的寄存器上下文和栈，直接操作栈则基本没有内核切换的开销，可以不加锁的访问全局变量，所以上下文的切换非常快。
 
@@ -1286,6 +1294,32 @@ golang语言作者Rob Pike也说：**Goroutine是一个与其他goroutines 并�
 一个运行的程序由一个或更多个goroutine组成。它与线程、协程、进程等不同。它是一个goroutine。**
 
 Go 协程通过通道来通信,而协程通过让出和恢复操作来通信，而且Go 协程比协程更强大。因为Golang 在 runtime、系统调用等多方面对 goroutine 调度进行了封装和处理。也就是Golang 有自己的调度器，**工作方式基本上是协作式，而不是抢占式**，但也不是完全的协作式调度 例如在系统调用的函数入口处会有抢占。当遇到长时间执行或者进行系统调用时，会主动把当前 goroutine 的CPU (P) 转让出去，让其他 goroutine 能被调度并执行，也就是我们为什么说 Golang 从语言层面支持了协程。**简单的说就是golang自己实现了协程并叫做goroutine。**
+
+线程分为内核态线程和用户态线程，用户态线程需要绑定内核态线程，CPU并不能感知用户态线程的存在，它只知道它在运行1个线程，这个线程实际是内核态线程。**用户态线程实际有个名字叫协程（co-routine）**
+
+协程跟线程是有区别的，线程由CPU调度是抢占式的，**协程由用户态调度是协作式的**，一个协程让出CPU后，才执行下一个协程。
+
+协程和线程有3种映射关系：
+
+- N:1，N个协程绑定1个线程，优点就是**协程在用户态线程即完成切换，不会陷入到内核态，这种切换非常的轻量快速**。但也有很大的缺点，1个进程的所有协程都绑定在1个线程上，一是某个程序用不了硬件的多核加速能力，二是一旦某协程阻塞，造成线程阻塞，本进程的其他协程都无法执行了，根本就没有并发的能力了。
+- 1:1，1个协程绑定1个线程，这种最容易实现。协程的调度都由CPU完成了，不存在N:1缺点，但有一个缺点是协程的创建、删除和切换的代价都由CPU完成，有点略显昂贵了。
+- M:N，M个协程绑定N个线程，是N:1和1:1类型的结合，克服了以上2种模型的缺点，但实现起来最为复杂。Go调度模型采取的就是这个模型。
+
+#### 调度器的设计思想：
+
+![golang-schedule](../images/golang-schedule.png)
+
+调度器的有两大思想：
+
+**复用线程**：协程本身就是运行在一组线程之上，不需要频繁的创建、销毁线程，而是对线程的复用。在调度器中复用线程还有2个体现：1）work stealing，当本线程无可运行的G时，尝试从其他线程绑定的P偷取G，而不是销毁线程。2）hand off，当本线程因为G进行系统调用阻塞时，线程释放绑定的P，把P转移给其他空闲的线程执行。
+
+**利用并行**：GOMAXPROCS设置P的数量，当GOMAXPROCS大于1时，就最多有GOMAXPROCS个线程处于运行状态，这些线程可能分布在多个CPU核上同时运行，使得并发利用并行。另外，GOMAXPROCS也限制了并发的程度，比如GOMAXPROCS = 核数/2，则最多利用了一半的CPU核进行并行。
+
+调度器的两小策略：
+
+**抢占**：在coroutine中要等待一个协程主动让出CPU才执行下一个协程，在Go中，一个goroutine最多占用CPU 10ms，防止其他goroutine被饿死，这就是goroutine不同于coroutine的一个地方。
+
+**全局G队列**：在新的调度器中依然有全局G队列，但功能已经被弱化了，当M执行work stealing从其他P偷不到G时，它可以从全局G队列获取G。
 
 ### Golang GC
 
@@ -1332,7 +1366,8 @@ Golang中经历的几个过程：
 2、**减少对象分配** 所谓减少对象的分配，实际上是尽量做到，对象的重用。 比如像如下的两个函数定义：
 
 ~~~go
-func(r*Reader)Read()([]byte,error)func(r*Reader)Read(buf[]byte)(int,error)
+func(r *Reader)Read()([]byte,error)
+func(r *Reader)Read(buf []byte)(int,error)
 ~~~
 
 第一个函数没有形参，每次调用的时候返回一个[]byte，第二个函数在每次调用的时候，形参是一个buf []byte 类型的对象，之后返回读入的byte的数目。第一个函数在每次调用的时候都会分配一段空间，这会给gc造成额外的压力。第二个函数在每次调用的时候，会重用形参声明。
@@ -1340,7 +1375,11 @@ func(r*Reader)Read()([]byte,error)func(r*Reader)Read(buf[]byte)(int,error)
 3、 **string与[]byte转化**  在stirng与[]byte之间进行转换，会给gc造成压力。对比下两者的数据结构：
 
 ~~~go
-type = struct []uint8 {    uint8 *array;    int len;    int cap;}type = struct string {    uint8 *str;    int len;}
+type = struct []uint8 {  
+  uint8 *array;
+  int len;
+  int cap;}
+type = struct string {    uint8 *str;    int len;}
 ~~~
 
 两者发生转换的时候，底层数据结结构会进行复制，因此导致gc效率会变低。解决策略上，一种方式是一直使用[]byte，特别是在数据传输方面，[]byte中也包含着许多string会常用到的有效的操作。另一种是使用更为底层的操作直接进行转化，避免复制行为的发生。
@@ -1372,8 +1411,31 @@ gc 49 @44.429s 12%: 3.1+890+0.40 ms clock, 6.2+492/833/0+0.81 ms cpu, 440->528->
 gc 50 @46.188s 12%: 0.23+1165+0.13 ms clock, 0.47+624/1158/0+0.27 ms cpu, 471->579->323 MB, 589 MB goal, 4 P
 gc 51 @48.252s 13%: 0.26+1410+0.14 ms clock, 0.52+358/1336/9.9+0.28 ms cpu, 506->620->343 MB, 646 MB goal, 4 P
 gc 52 @50.942s 13%: 0.27+806+0.51 ms clock, 0.55+403/805/200+1.0 ms cpu, 549->657->340 MB, 687 MB goal, 4 P
-gc 53 @53.014s 13%: 0.10+857+0.36 ms clock, 0.21+467/851/94+0.73 ms cpu, 546->666->351 MB, 681 MB goal, 4 P
+gc 53 @53.014s 13%: 0.10+857+0.36 ms clock, 0.21+467/851/94+0.73 ms cpu, 546->666->351 MB, 681 MB goal, 4 
 ~~~
+
+官方的解释文档：
+
+~~~shell
+Currently, it is:
+    gc # @#s #%: #+#+# ms clock, #+#/#/#+# ms cpu, #->#-># MB, # MB goal, # P
+where the fields are as follows:
+    gc #        the GC number, incremented at each GC
+    @#s         time in seconds since program start
+    #%          percentage of time spent in GC since program start
+    #+...+#     wall-clock/CPU times for the phases of the GC
+    #->#-># MB  heap size at GC start, at GC end, and live heap
+    # MB goal   goal heap size
+    # P         number of processors used
+The phases are stop-the-world (STW) sweep termination, concurrent
+mark and scan, and STW mark termination. The CPU times
+for mark/scan are broken down in to assist time (GC performed in
+line with allocation), background GC time, and idle GC time.
+If the line ends with "(forced)", this GC was forced by a
+runtime.GC() call and all phases are STW.
+~~~
+
+结合上述文档，我们知道：
 
 gc 45：表示第45次GC，共有4个P (线程)参与GC。
 
@@ -1417,4 +1479,281 @@ gc 1404     : The 1404 GC run since the program started
 12P         : Number of logical processors or threads used to run Goroutines
 ~~~
 
-Go Module模式下编译：进入到项目所在目录，go install ./... 即可
+Go Module模式下编译：进入到项目所在目录，go install ./... 即可，或者直接进入某一个目录，执行上述命令。
+
+### Golang调度
+
+#### 为什么Go的runtime需要调度器？
+
+在我们研究新的调度器之前，我们需要明白为什么需要它。当操作系统可用给你调度线程时，为什么还要创建一个用户空间的调度器呢？
+
+POSIX线程API在很大程度上是对现有Unix进程模型的逻辑扩展，因此，线程获得了许多与进程相同的控控件。比如，线程具有自己的信号掩码，可以分配给CPU调度，可用放入cgroup中，并可以查询它们使用的资源。所有这些控件增加了Go程序如何使用goroutines根本不需要的功能的开销，并且当您的程序中有100,000个线程时，它们会迅速增加。
+
+另一个问题是，OS无法基于Go模型做出明智的调度决策。例如，Go垃圾收集器要求在运行收集时停止所有线程，并且内存必须处于一致状态。这涉及等待运行的线程到达我们知道内存一致的地步。
+
+当您随机生成了许多线程时，很可能将不得不等待很多线程达到一致的状态。Go调度程序可以决定仅在知道内存一致的点上进行调度。这意味着当我们停止垃圾回收时，我们只需要等待正在CPU内核上主动运行的线程即可。
+
+#### 调度器的角色
+
+通常有3种线程模型。一种是N：1，其中一个OS线程上运行多个用户空间线程。这样的优点是可以非常快速地进行上下文切换，但不能利用多核系统。另一个是1：1，其中一个执行线程与一个OS线程匹配。它利用了计算机上的所有内核，但是上下文切换很慢，因为它必须捕获整个OS。
+
+Go尝试通过使用M：N调度程序来兼顾两全其美。它将任意数量的goroutine调度到任意数量的OS线程上。您可以快速进行上下文切换，并利用系统中的所有核心。这种方法的主要缺点是它增加了调度程序的复杂性。
+
+为了完成调度任务，Go Scheduler使用了3个主要实体：
+
+![mainentity](../images/mainentity.png)
+
+三角形代表OS线程。它是由操作系统管理的执行线程，其工作原理与您的标准POSIX线程非常相似。在运行时代码中，对于机器 ，它称为**M。**
+
+圆圈代表goroutine。它包括堆栈，指令指针和其他对调度goroutine至关重要的信息，例如可能会阻塞其的任何通道。在运行时代码，它被称为**G**。
+
+矩形代表计划的上下文。您可以将其视为调度程序的本地化版本，该调度程序在单个线程上运行Go代码。这是让我们从N：1调度程序转到M：N调度程序的重要部分。在运行时代码中，对于处理器，它称为**P。**
+
+![goshedule](../images/goshedule.png)
+
+如上图，我们看到2个线程（**M**），每个线程都有一个上下文（**P**），每个线程都运行一个goroutine（**G**）。为了运行goroutine，线程必须拥有一个上下文。
+
+上下文数量在启动时设置为`GOMAXPROCS`环境变量的值或通过运行时函数设置`GOMAXPROCS()`。通常，在执行程序期间这不会改变。上下文数量是固定的，这意味着`GOMAXPROCS`在任何时候都只运行Go代码。我们可以使用它来调整Go进程对单个计算机的调用，例如，在4核PC上，正在4个线程上运行Go代码。
+
+变灰的goroutine尚未运行，但已准备好进行调度。它们被排列在称为运行队列的列表中。每当goroutine执行一条`go`语句时，就会将goroutines添加到运行队列的末尾。上下文在一个调度程序中运行了一个goroutine直到一个调度点后，它便将goroutine从其运行队列中弹出，设置堆栈和指令指针，然后开始运行goroutine。
+
+为了减少互斥锁争用，每个上下文都有其自己的本地运行队列。Go调度程序的早期版本仅具有全局运行队列，并带有互斥量来保护它。线程经常被阻塞，等待互斥锁解锁。当您有32台核心计算机想要充分利用性能时，这变得非常糟糕。
+
+只要所有上下文都有要运行的goroutine，调度程序便会在此稳态下继续调度。但是，有两种情况可以改变这种情况。
+
+#### 调度谁？
+
+您可能现在想知道，为什么要有上下文？我们不能只是将运行队列放在线程上并摆脱上下文吗？并不是的。我们拥有上下文的原因是，如果正在运行的线程出于某种原因需要阻塞，我们可以将它们移交给其他线程。
+
+当我们需要调用系统调用时，就需要阻塞的一个例子。由于线程既不能执行代码，也不能在系统调用中被阻塞，所以我们需要移交上下文，以便它可以保持调度。
+
+![syscall2](../images/syscall2.jpg)
+
+在这里，我们看到一个线程放弃其上下文，以便另一个线程可以运行它。调度程序确保有足够的线程来运行所有上下文。 上图中的**M1**可能仅出于处理此系统调用的目的而创建，也可能来自线程缓存。syscalling线程将保留进行syscall的goroutine，因为它在技术上仍在执行，尽管已在OS中被阻塞。
+
+当系统调用返回时，线程必须尝试获取上下文才能运行返回的goroutine。正常的操作模式是从其他线程之一窃取上下文。如果无法窃取，它将把goroutine放在全局运行队列中，将自身放在线程缓存中并进入睡眠状态。
+
+全局运行队列是上下文从本地运行队列用尽时开始提取的运行队列。上下文还定期检查全局运行队列中的goroutine。否则，由于饥饿，全局运行队列上的goroutine可能永远无法运行。
+
+这种处理syscall的原因是Go程序即使在`GOMAXPROCS`1 时也有多个线程运行的原因。运行时使用goroutines调用syscall，将线程留在后面。
+
+#### Goroutine窃取
+
+可以更改系统稳定状态的另一种方法是，当上下文用尽了要安排的goroutine时。如果上下文的运行队列上的工作量不平衡，则会发生这种情况。当系统中仍有工作要做时，这可能导致上下文最终耗尽其运行队列。为了继续运行Go代码，上下文可以将goroutine从全局运行队列中取出，但是如果其中没有goroutine，则必须从其他地方获取它们。
+
+![goroutinestealing](../images/goroutinestealing.png)
+
+那是其他上下文。当上下文耗尽时，它将尝试从另一个上下文中窃取大约一半的运行队列。这样可以确保始终在每个上下文上进行工作，从而确保所有线程都在最大容量下工作。
+
+1. 当我们执行 `go func()` 时，实际上就是创建一个全新的 Goroutine，我们称它为 G。
+2. 新创建的 G 会被优先放入 P 的本地队列（Local Queue），本地队列超过256时，会放入全局队列（Global Queue）中，准备下一步的动作。
+3. 唤醒或创建 M 以便执行 G。
+4. 不断地进行事件循环
+5. 寻找在可用状态下的 G 进行执行任务
+
+#### Golang DEBUG
+
+GODEBUG 变量可以控制运行时内的调试变量，参数以逗号分隔，格式为：`name=val`。本文着重点在调度器观察上，将会使用如下两个参数：
+
+- schedtrace：设置 `schedtrace=X` 参数可以使运行时在每 X 毫秒发出一行调度器的摘要信息到标准 err 输出中。
+- scheddetail：设置 `schedtrace=X` 和 `scheddetail=1` 可以使运行时在每 X 毫秒发出一次详细的多行信息，信息内容主要包括调度程序、处理器、OS 线程 和 Goroutine 的状态。
+
+比如，我们执行以下代码：
+
+~~~go
+package main
+
+import "sync"
+
+func main(){
+	wg := sync.WaitGroup{}
+	wg.Add(10)
+	for i := 0; i< 10;i++ {
+		go func(wg *sync.WaitGroup) {
+			var counter int
+			for i := 0;i < 1e10;i ++{
+				counter++
+			}
+			wg.Done()
+		}(&wg)
+	}
+	wg.Wait()
+}
+
+//编译： go build -o ./  debug.go 
+//执行：GODEBUG=schedtrace=1000 ./awesomeProject 
+~~~
+
+执行上述命令后，输出：
+
+~~~go
+SCHED 0ms: gomaxprocs=4 idleprocs=1 threads=5 spinningthreads=1 idlethreads=0 runqueue=0 [0 0 0 0]
+SCHED 1000ms: gomaxprocs=4 idleprocs=0 threads=5 spinningthreads=0 idlethreads=0 runqueue=0 [1 4 1 0]
+SCHED 2008ms: gomaxprocs=4 idleprocs=0 threads=5 spinningthreads=0 idlethreads=0 runqueue=0 [1 4 1 0]
+SCHED 3014ms: gomaxprocs=4 idleprocs=0 threads=5 spinningthreads=0 idlethreads=0 runqueue=0 [1 4 1 0]
+SCHED 4022ms: gomaxprocs=4 idleprocs=0 threads=5 spinningthreads=0 idlethreads=0 runqueue=0 [1 4 1 0]
+SCHED 5030ms: gomaxprocs=4 idleprocs=0 threads=5 spinningthreads=0 idlethreads=0 runqueue=0 [1 4 1 0]
+SCHED 6036ms: gomaxprocs=4 idleprocs=0 threads=5 spinningthreads=0 idlethreads=0 runqueue=0 [1 4 1 0]
+SCHED 7045ms: gomaxprocs=4 idleprocs=0 threads=5 spinningthreads=0 idlethreads=0 runqueue=0 [0 1 0 1]
+SCHED 8052ms: gomaxprocs=4 idleprocs=0 threads=5 spinningthreads=0 idlethreads=0 runqueue=0 [0 1 0 1]
+SCHED 9056ms: gomaxprocs=4 idleprocs=0 threads=5 spinningthreads=0 idlethreads=0 runqueue=0 [0 1 0 1]
+SCHED 10058ms: gomaxprocs=4 idleprocs=0 threads=5 spinningthreads=0 idlethreads=0 runqueue=0 [0 1 0 1]
+SCHED 11064ms: gomaxprocs=4 idleprocs=0 threads=5 spinningthreads=0 idlethreads=0 runqueue=0 [0 1 0 1]
+SCHED 12064ms: gomaxprocs=4 idleprocs=0 threads=5 spinningthreads=0 idlethreads=0 runqueue=0 [0 1 0 1]
+SCHED 13071ms: gomaxprocs=4 idleprocs=2 threads=5 spinningthreads=0 idlethreads=2 runqueue=0 [0 0 0 0]
+SCHED 14074ms: gomaxprocs=4 idleprocs=2 threads=5 spinningthreads=0 idlethreads=2 runqueue=0 [0 0 0 0]
+SCHED 15082ms: gomaxprocs=4 idleprocs=2 threads=5 spinningthreads=0 idlethreads=2 runqueue=0 [0 0 0 0]
+
+~~~
+
+- sched：每一行都代表调度器的调试信息，后面提示的毫秒数表示启动到现在的运行时间，输出的时间间隔受 `schedtrace` 的值影响。
+- gomaxprocs：当前的 CPU 核心数（GOMAXPROCS 的当前值）。
+- idleprocs：空闲的处理器数量，后面的数字表示当前的空闲数量。
+- threads：OS 线程数量，后面的数字表示当前正在运行的线程数量。
+- spinningthreads：自旋状态的 OS 线程数量。
+- idlethreads：空闲的线程数量。
+- runqueue：全局队列中中的 Goroutine 数量，而后面的 [0 0 1 1] 则分别代表这 4 个 P 的本地队列正在运行的 Goroutine 数量。
+
+关于上边提到的自旋线程：自旋线程的这个说法，是因为 Go Scheduler 的设计者在考虑了 “OS 的资源利用率” 以及 “频繁的线程抢占给 OS 带来的负载” 之后，提出了 “Spinning Thread” 的概念。也就是当 “自旋线程” 没有找到可供其调度执行的 Goroutine 时，并不会销毁该线程 ，而是采取 “自旋” 的操作保存了下来。虽然看起来这是浪费了一些资源，但是考虑一下 syscall 的情景就可以知道，比起 “自旋"，线程间频繁的抢占以及频繁的创建和销毁操作可能带来的危害会更大。
+
+如果我们想要更详细的看到调度器的完整信息时，我们可以增加 `scheddetail` 参数，就能够更进一步的查看调度的细节逻辑，如下：
+
+~~~shell
+GODEBUG=scheddetail=1,schedtrace=1000 ./command-line-arguments 
+~~~
+
+输出结果：
+
+~~~shell
+SCHED 0ms: gomaxprocs=4 idleprocs=1 threads=4 spinningthreads=1 idlethreads=0 runqueue=0 gcwaiting=0 nmidlelocked=1 stopwait=0 sysmonwait=0
+  P0: status=1 schedtick=0 syscalltick=0 m=3 runqsize=1 gfreecnt=0
+  P1: status=1 schedtick=0 syscalltick=0 m=2 runqsize=0 gfreecnt=0
+  P2: status=0 schedtick=0 syscalltick=0 m=-1 runqsize=0 gfreecnt=0
+  P3: status=0 schedtick=0 syscalltick=0 m=-1 runqsize=0 gfreecnt=0
+  M3: p=0 curg=-1 mallocing=0 throwing=0 preemptoff= locks=1 dying=0 spinning=false blocked=false lockedg=-1
+  M2: p=1 curg=-1 mallocing=0 throwing=0 preemptoff= locks=2 dying=0 spinning=false blocked=false lockedg=-1
+  M1: p=-1 curg=-1 mallocing=0 throwing=0 preemptoff= locks=1 dying=0 spinning=false blocked=false lockedg=-1
+  M0: p=-1 curg=-1 mallocing=0 throwing=0 preemptoff= locks=0 dying=0 spinning=false blocked=true lockedg=1
+  G1: status=1(chan receive) m=-1 lockedm=0
+  G2: status=1() m=-1 lockedm=-1
+  G3: status=1() m=-1 lockedm=-1
+  G4: status=4(GC scavenge wait) m=-1 lockedm=-1
+SCHED 1007ms: gomaxprocs=4 idleprocs=0 threads=6 spinningthreads=0 idlethreads=1 runqueue=0 gcwaiting=0 nmidlelocked=0 stopwait=0 sysmonwait=0
+  P0: status=1 schedtick=2 syscalltick=0 m=5 runqsize=0 gfreecnt=0
+  P1: status=1 schedtick=3 syscalltick=0 m=0 runqsize=3 gfreecnt=0
+  P2: status=1 schedtick=1 syscalltick=0 m=4 runqsize=3 gfreecnt=0
+  P3: status=1 schedtick=1 syscalltick=0 m=3 runqsize=0 gfreecnt=0
+  M5: p=0 curg=18 mallocing=0 throwing=0 preemptoff= locks=0 dying=0 spinning=false blocked=false lockedg=-1
+  M4: p=2 curg=22 mallocing=0 throwing=0 preemptoff= locks=0 dying=0 spinning=false blocked=false lockedg=-1
+  M3: p=3 curg=17 mallocing=0 throwing=0 preemptoff= locks=0 dying=0 spinning=false blocked=false lockedg=-1
+  M2: p=-1 curg=-1 mallocing=0 throwing=0 preemptoff= locks=0 dying=0 spinning=false blocked=true lockedg=-1
+  M1: p=-1 curg=-1 mallocing=0 throwing=0 preemptoff= locks=1 dying=0 spinning=false blocked=false lockedg=-1
+  M0: p=1 curg=26 mallocing=0 throwing=0 preemptoff= locks=0 dying=0 spinning=false blocked=false lockedg=-1
+  G1: status=4(semacquire) m=-1 lockedm=-1
+  G2: status=4(force gc (idle)) m=-1 lockedm=-1
+  G3: status=4(GC sweep wait) m=-1 lockedm=-1
+  G4: status=4(GC scavenge wait) m=-1 lockedm=-1
+  G17: status=2() m=3 lockedm=-1
+  G18: status=2() m=5 lockedm=-1
+  G19: status=1() m=-1 lockedm=-1
+  G20: status=1() m=-1 lockedm=-1
+  G21: status=1() m=-1 lockedm=-1
+  G22: status=2() m=4 lockedm=-1
+  G23: status=1() m=-1 lockedm=-1
+  G24: status=1() m=-1 lockedm=-1
+  G25: status=1() m=-1 lockedm=-1
+  G26: status=2() m=0 lockedm=-1
+........
+~~~
+
+挨个分析一下输出字段的含义：
+
+##### G
+
+- status：G 的运行状态。
+- m：隶属哪一个 M。
+- lockedm：是否有锁定 M。
+
+其中G的状态总共九种：
+
+| 状态              | 值   | 含义                                                         |
+| ----------------- | ---- | ------------------------------------------------------------ |
+| _Gidle            | 0    | 刚刚被分配，还没有进行初始化。                               |
+| _Grunnable        | 1    | 已经在运行队列中，还没有执行用户代码。                       |
+| _Grunning         | 2    | 不在运行队列里中，已经可以执行用户代码，此时已经分配了 M 和 P。 |
+| _Gsyscall         | 3    | 正在执行系统调用，此时分配了 M。                             |
+| _Gwaiting         | 4    | 在运行时被阻止，没有执行用户代码，也不在运行队列中，此时它正在某处阻塞等待中。 |
+| _Gmoribund_unused | 5    | 尚未使用，但是在 gdb 中进行了硬编码。                        |
+| _Gdead            | 6    | 尚未使用，这个状态可能是刚退出或是刚被初始化，此时它并没有执行用户代码，有可能有也有可能没有分配堆栈。 |
+| _Genqueue_unused  | 7    | 尚未使用。                                                   |
+| _Gcopystack       | 8    | 正在复制堆栈，并没有执行用户代码，也不在运行队列中。         |
+
+在理解了各类的状态的意思后，我们结合上述案例看看，如下：
+
+~~~
+G1: status=4(semacquire) m=-1 lockedm=-1
+G2: status=4(force gc (idle)) m=-1 lockedm=-1
+G3: status=4(GC sweep wait) m=-1 lockedm=-1
+G17: status=1() m=-1 lockedm=-1
+G18: status=2() m=4 lockedm=-1
+~~~
+
+在这个片段中，G1 的运行状态为 `_Gwaiting`，并没有分配 M 和锁定。这时候你可能好奇在片段中括号里的是什么东西呢，其实是因为该 `status=4` 是表示 `Goroutine` 在**运行时时被阻止**，而阻止它的事件就是 `semacquire` 事件，是因为 `semacquire` 会检查信号量的情况，在合适的时机就调用 `goparkunlock` 函数，把当前 `Goroutine` 放进等待队列，并把它设为 `_Gwaiting` 状态。
+
+那么在实际运行中还有什么原因会导致这种现象呢，我们一起看看，如下：
+
+~~~go
+ waitReasonZero                                    // ""
+    waitReasonGCAssistMarking                         // "GC assist marking"
+    waitReasonIOWait                                  // "IO wait"
+    waitReasonChanReceiveNilChan                      // "chan receive (nil chan)"
+    waitReasonChanSendNilChan                         // "chan send (nil chan)"
+    waitReasonDumpingHeap                             // "dumping heap"
+    waitReasonGarbageCollection                       // "garbage collection"
+    waitReasonGarbageCollectionScan                   // "garbage collection scan"
+    waitReasonPanicWait                               // "panicwait"
+    waitReasonSelect                                  // "select"
+    waitReasonSelectNoCases                           // "select (no cases)"
+    waitReasonGCAssistWait                            // "GC assist wait"
+    waitReasonGCSweepWait                             // "GC sweep wait"
+    waitReasonChanReceive                             // "chan receive"
+    waitReasonChanSend                                // "chan send"
+    waitReasonFinalizerWait                           // "finalizer wait"
+    waitReasonForceGGIdle                             // "force gc (idle)"
+    waitReasonSemacquire                              // "semacquire"
+    waitReasonSleep                                   // "sleep"
+    waitReasonSyncCondWait                            // "sync.Cond.Wait"
+    waitReasonTimerGoroutineIdle                      // "timer goroutine (idle)"
+    waitReasonTraceReaderBlocked                      // "trace reader (blocked)"
+    waitReasonWaitForGCCycle                          // "wait for GC cycle"
+    waitReasonGCWorkerIdle                            // "GC worker (idle)"
+~~~
+
+我们通过以上 `waitReason` 可以了解到 `Goroutine` 会被暂停运行的原因要素，也就是会出现在括号中的事件。
+
+##### 看完G我们再看看M：
+
+- p：隶属哪一个 P。
+- curg：当前正在使用哪个 G。
+- runqsize：运行队列中的 G 数量。
+- gfreecnt：可用的G（状态为 Gdead）。
+- mallocing：是否正在分配内存。
+- throwing：是否抛出异常。
+- preemptoff：不等于空字符串的话，保持 curg 在这个 m 上运行。
+
+##### P
+
+- status：P 的运行状态。
+- schedtick：P 的调度次数。
+- syscalltick：P 的系统调用次数。
+- m：隶属哪一个 M。
+- runqsize：运行队列中的 G 数量。
+- gfreecnt：可用的G（状态为 Gdead）。
+
+| 状态      | 值   | 含义                                                         |
+| --------- | ---- | ------------------------------------------------------------ |
+| _Pidle    | 0    | 刚刚被分配，还没有进行进行初始化。                           |
+| _Prunning | 1    | 当 M 与 P 绑定调用 acquirep 时，P 的状态会改变为 _Prunning。 |
+| _Psyscall | 2    | 正在执行系统调用。                                           |
+| _Pgcstop  | 3    | 暂停运行，此时系统正在进行 GC，直至 GC 结束后才会转变到下一个状态阶段。 |
+| _Pdead    | 4    | 废弃，不再使用。                                             |
