@@ -32,6 +32,19 @@ cat 文件名 打开文件、
 
 mv xxx ~/.Trash  y移到回收站
 
+cat filename | tail -n 100 显示文件最后100行
+
+cat filename | head -n 100 显示文件前面100行
+
+cat filename | tail -n +100 从100行开始显示，显示100行以后的所有行
+
+显示100行到500行
+
+cat filename | head -n 500 | tail -n +100
+
+
+
+
 查看端口：
 
 netstat -an | grep 3306
@@ -941,3 +954,47 @@ Linux系统中，文件具体可分为以下几种类型：
 
 不利之处在于，使用任何硬件设备都必须与根目录下某一目录执行挂载操作，否则无法使用。
 
+图解编译原理里说 **进程的本质是代码区的指令不断执行，驱使动态数据区和静态数据区产生数据变化。**
+
+### Select，Poll And Epoll
+
+select，poll和epoll，三个都是IO多路复用的机制，可以监视多个描述符的读/写等事件，一旦某个描述符就绪（一般是读或者写事件发生了），就能够将发生的事件通知给关心的应用程序去处理该事件。本质上，select，poll和epoll都是同步I/O，UNIX网络编程中，给出了5中IO模型：blocking IO，nonblocking IO，IO multiplexing ，signal driven IO，和asynchronous IO 。其中前面四种都是synchronous IO。
+
+#### IO - 同步、异步、阻塞、非阻塞
+
+下面以network IO中的read读操作为切入点，来讲述同步（synchronous） IO和异步（asynchronous） IO、阻塞（blocking） IO和非阻塞（non-blocking）IO的异同。一般情况下，一次网络IO读操作会涉及两个系统对象：(1) 用户进程(线程)Process；(2)内核对象kernel，两个处理阶段：
+
+~~~javascript
+[1] Waiting for the data to be ready - 等待数据准备好
+[2] Copying the data from the kernel to the process - 将数据从内核空间的buffer拷贝到用户空间进程的buffer
+~~~
+
+IO模型的异同点就是区分在这两个系统对象、两个处理阶段的不同上。
+
+##### 同步IO之Blocking IO
+
+![syncblockingio](../images/syncblockingio.png)
+
+如上图所示，用户进程process在Blocking IO读recvfrom操作的两个阶段都是等待的。在数据没准备好的时候，process原地等待kernel准备数据。kernel准备好数据后，process继续等待kernel将数据copy到自己的buffer。在kernel完成数据的copy后process才会从recvfrom系统调用中返回。
+
+##### 同步IO 之NonBlocking IO
+
+![nonblockingio](../images/nonblockingio.png)
+
+从图中可以看出，process在NonBlocking IO读recvfrom操作的第一个阶段是不会block等待的，如果kernel数据还没准备好，那么recvfrom会立刻返回一个EWOULDBLOCK错误。当kernel准备好数据后，进入处理的第二阶段的时候，process会等待kernel将数据copy到自己的buffer，在kernel完成数据的copy后process才会从recvfrom系统调用中返回。
+
+##### 同步IO 之 IO multiplexing
+
+![multiplexing](../images/multiplexing.png)
+
+IO多路复用，就是我们熟知的select、poll、epoll模型。从图上可见，在IO多路复用的时候，process在两个处理阶段都是block住等待的。初看好像IO多路复用没什么用，其实select、poll、epoll的优势在于可以以较少的代价来同时监听处理多个IO。
+
+##### 异步IO
+
+![asynchronousio](../images/asynchronousio.png)
+
+从上图看出，异步IO要求process在recvfrom操作的两个处理阶段上都不能等待，也就是process调用recvfrom后立刻返回，kernel自行去准备好数据并将数据从kernel的buffer中copy到process的buffer在通知process读操作完成了，然后process在去处理。遗憾的是，linux的网络IO中是不存在异步IO的，linux的网络IO处理的第二阶段总是阻塞等待数据copy完成的。真正意义上的网络异步IO是Windows下的IOCP（IO完成端口）模型。
+
+![comparisionfiveio](../images/comparisionfiveio.png)
+
+很多时候，我们比较容易混淆non-blocking IO和asynchronous IO，认为是一样的。但是通过上图，几种IO模型的比较，会发现non-blocking IO和asynchronous IO的区别还是很明显的，**non-blocking IO仅仅要求处理的第一阶段不block即可，而asynchronous IO要求两个阶段都不能block住**。
