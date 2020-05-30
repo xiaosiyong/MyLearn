@@ -47,6 +47,8 @@ cat filename | head -n 500 | tail -n +100
 
 查看端口：
 
+netstat -lnpt 查看监听端口
+
 netstat -an | grep 3306
 
 lsof -i tcp:portnet
@@ -998,3 +1000,4 @@ IO多路复用，就是我们熟知的select、poll、epoll模型。从图上可
 ![comparisionfiveio](../images/comparisionfiveio.png)
 
 很多时候，我们比较容易混淆non-blocking IO和asynchronous IO，认为是一样的。但是通过上图，几种IO模型的比较，会发现non-blocking IO和asynchronous IO的区别还是很明显的，**non-blocking IO仅仅要求处理的第一阶段不block即可，而asynchronous IO要求两个阶段都不能block住**。
+
