@@ -219,13 +219,13 @@ POST _reindex?wait_for_completion=false
 这个时候，我们就要重建索引的时候，在参数里加上上一次重建索引的时间戳，直白的说就是，比如我们的数据是 100G，这时候我们重建索引了，但是这个 100G 在增加，那么我们重建索引的时候，需要记录好重建索引的时间戳，记录时间戳的目的是下一次重建索引跑任务的时候不用全部重建，只需要在此时间戳之后的重建就可以，如此迭代，直到新老索引数据量基本一致，把数据流向切换到新索引的名字。
 
 ~~~sql
-POST /_reindex
+baPOST /_reindex
 {
     "conflicts": "proceed",          //意思是冲突以旧索引为准，直接跳过冲突，否则会抛出异常，停止task
     "source": {
         "index": "old_index"         //旧索引
         "query": {
-            "constant_score" : {
+          "constant_score" : {
                 "filter" : {
                     "range" : {
                         "data_update_time" : {
@@ -243,3 +243,54 @@ POST /_reindex
 }
 ~~~
 
+## 4、ElasticSearch Circuit Breaker
+
+为了防止OOM，ES包含了多种熔断器。每一种熔断器都指定了es可以用多少内存。除此之外，也有一个父级别的熔断器，指定了通过各个熔断器所能使用的总的内存。除了我们特别说明的，这些设置都可以通过在现有的集群上动态更新。
+
+### 4.1Parent circuit breaker 
+
+可以通过如下配置：
+
+**`indices.breaker.total.use_real_memory`**，当配置为true时，parent breaker会计算真正使用的内存；当设置为false时，只会计算子断路器保留的内存，默认是true。Static setting determining whether the parent breaker should take real memory usage into account (`true`) or only consider the amount that is reserved by child circuit breakers (`false`). Defaults to `true`.
+
+**`indices.breaker.total.limit`**， 当上一个参数为true时，默认是堆内存的95%，为false时，默认是堆内存的70%。 Starting limit for overall parent breaker, defaults to 70% of JVM heap if `indices.breaker.total.use_real_memory` is `false`. If `indices.breaker.total.use_real_memory` is `true`, defaults to 95% of the JVM heap.
+
+### 4.2 Field data circuit breaker
+
+字段数据断路器允许es来计算总的字段加载到内存所需要的内存大小。它可以防止加载字段超过内存导致的异常。默认配置的是40%的堆内存。可以通过如下参数配置：
+
+**`indices.breaker.fielddata.limit`**，字段数据断路器的限制大小，默认40%堆内存；Limit for fielddata breaker, defaults to 40% of JVM heap
+
+**`indices.breaker.fielddata.overhead`** 一个与所有字段数据都相乘来确定最终计算的大小的常量，默认是1.03。A constant that all field data estimations are multiplied with to determine a final estimation. Defaults to 1.03
+
+### 4.3 Request circuit breaker
+
+请求断路器允许 Elasticsearch 防止每个请求的数据结构（例如，用于在请求期间计算聚合的内存）超过一定量的内存。通过如下参数设置：
+
+**`indices.breaker.request.limit`**默认是堆内存的60%。Limit for request breaker, defaults to 60% of JVM heap
+
+**`indices.breaker.request.overhead`**，含义同字段数据断路器里的overhead，默认是1。A constant that all request estimations are multiplied with to determine a final estimation. Defaults to 1
+
+### 4.4 In flight requests circuit breaker
+
+In flight断路器允许es限制内存使用，当所有目前活动的传入请求传输总量或 HTTP级别在单节点上超过一定的总量的时候。内存使用情况基于请求本身的内容长度。In flight断路器认为内存不仅需要用来表示原始请求，而且还用作反映结构化对象的默认开销。
+
+**`network.breaker.inflight_requests.limit`**，默认是堆内存的大小。Limit for in flight requests breaker, defaults to 100% of JVM heap. This means that it is bound by the limit configured for the parent circuit breaker.
+
+**`network.breaker.inflight_requests.overhead`**，默认是2。
+
+A constant that all in flight requests estimations are multiplied with to determine a final estimation. Defaults to 2.
+
+### 4.5 Accounting requests circuit breaker
+
+Accounting requests断路器允许 Elasticsearch 限制在请求完成时未释放的内存中的内存使用量，这包括Lucene段内存之类的内容。
+
+**`indices.breaker.accounting.limit`**，默认配置100%堆内存。Limit for accounting breaker, defaults to 100% of JVM heap. This means that it is bound by the limit configured for the parent circuit breaker.
+
+**`indices.breaker.accounting.overhead`**，默认配置1。A constant that all accounting estimations are multiplied with to determine a final estimation. Defaults to 1
+
+### 4.6 Script compilation circuit breaker
+
+与之前的基于内存的断路器有轻微的区别，script compilation断路器在一段时间内限制内联脚本编译的数量。通过如下配置：
+
+**`script.max_compilations_rate`**，默认是5分钟75次。Limit for the number of unique dynamic scripts within a certain interval that are allowed to be compiled. Defaults to 75/5m, meaning 75 every 5 minutes.
