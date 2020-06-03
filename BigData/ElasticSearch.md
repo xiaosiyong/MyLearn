@@ -257,11 +257,11 @@ baPOST /_reindex
 
 ### 4.2 Field data circuit breaker
 
-字段数据断路器允许es来计算总的字段加载到内存所需要的内存大小。它可以防止加载字段超过内存导致的异常。默认配置的是40%的堆内存。可以通过如下参数配置：
+列数据断路器允许es来计算总的字段加载到内存所需要的内存大小。它可以防止加载列超过内存导致的异常。默认配置的是40%的堆内存。可以通过如下参数配置：
 
-**`indices.breaker.fielddata.limit`**，字段数据断路器的限制大小，默认40%堆内存；Limit for fielddata breaker, defaults to 40% of JVM heap
+**`indices.breaker.fielddata.limit`**，列数据断路器的限制大小，默认40%堆内存；Limit for fielddata breaker, defaults to 40% of JVM heap
 
-**`indices.breaker.fielddata.overhead`** 一个与所有字段数据都相乘来确定最终计算的大小的常量，默认是1.03。A constant that all field data estimations are multiplied with to determine a final estimation. Defaults to 1.03
+**`indices.breaker.fielddata.overhead`** 一个与所有列数据都相乘来确定最终计算的大小的常量，默认是1.03。A constant that all field data estimations are multiplied with to determine a final estimation. Defaults to 1.03
 
 ### 4.3 Request circuit breaker
 
