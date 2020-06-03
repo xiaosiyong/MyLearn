@@ -328,7 +328,61 @@ Docker镜像中会分成好几层，上面的读写层通常也称为容器层�
 
 Init 层是 Docker 项目单独生成的一个内部层，专门用来存放 /etc/hosts、/etc/resolv.conf 等信息。需要这样一层的原因是，这些文件本来属于只读的 Ubuntu 镜像的一部分，但是用户往往需要在启动容器时写入一些指定的值比如 hostname，所以就需要在可读写层对它们进行修改。可是，这些修改往往只对当前的容器有效，我们并不希望执行 docker commit 时，把这些信息连同可读写层一起提交掉。所以，Docker 做法是，在修改了这些文件之后，以一个单独的层挂载了出来。而用户执行 docker commit 只会提交可读写层，所以是不包含这些内容的。
 
-## 2、Kubernets
+#### 1.2.4 制作应用镜像
+
+以Python应用为例：
+
+~~~python
+from flask import Flask
+import socket
+import os
+
+app = Flask(__name__)
+
+@app.route('/')
+def hello():
+    html = "<h3>Hello {name}!</h3>" \
+           "<b>Hostname:</b> {hostname}<br/>"           
+    return html.format(name=os.getenv("NAME", "world"), hostname=socket.gethostname())
+    
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=80)
+~~~
+
+这个应用的依赖，则被定义在了同目录下的 requirements.txt 文件里，内容如下所示：
+
+~~~shell
+$ cat requirements.txt
+Flask
+~~~
+
+将这样一个应用容器化的第一步，是制作容器镜像。Docker提供了Dockerfile的方式：
+
+~~~dockerfile
+
+# 使用官方提供的Python开发镜像作为基础镜像
+FROM python:2.7-slim
+
+# 将工作目录切换为/app
+WORKDIR /app
+
+# 将当前目录下的所有内容复制到/app下
+ADD . /app
+
+# 使用pip命令安装这个应用所需要的依赖
+RUN pip install --trusted-host pypi.python.org -r requirements.txt
+
+# 允许外界访问容器的80端口
+EXPOSE 80
+
+# 设置环境变量
+ENV NAME World
+
+# 设置容器进程为：python app.py，即：这个Python应用的启动命令
+CMD ["python", "app.py"]
+~~~
+
+## 2、Kubernets初识
 
 解决的问题：
 
@@ -409,5 +463,41 @@ spec:
 
 实际上，过去很多的集群管理项目（比如 Yarn、Mesos，以及 Swarm）所擅长的，都是把一个容器，按照某种规则，放置在某个最佳节点上运行起来。这种功能，我们称为“调度”。而 Kubernetes 项目所擅长的，是按照用户的意愿和整个系统的规则，完全自动化地处理好容器之间的各种关系。这种功能，就是我们经常听到的一个概念：编排。所以说，**Kubernetes 项目的本质，是为用户提供一个具有普遍意义的容器编排工具。**
 
+## 3、Kubenetes集群搭建
 
+### 3.1 一键部署利器----kubeadm
+
+通过这样两条指令完成一个 Kubernetes 集群的部署：
+
+~~~shell
+# 创建一个Master节点
+$ kubeadm init
+
+# 将一个Node节点加入到当前集群中
+$ kubeadm join <Master节点的IP和端口>
+~~~
+
+kubelet 是 Kubernetes 项目用来操作 Docker 等容器运行时的核心组件。可是，除了跟容器运行时打交道外，kubelet 在配置容器网络、管理容器数据卷时，都需要直接操作宿主机。所以如果现在 kubelet 本身就运行在一个容器里，那么直接操作宿主机就会变得很麻烦。
+
+因此把 kubelet 直接运行在宿主机上，然后使用容器部署其他的 Kubernetes 组件。所以，你使用 kubeadm 的第一步，是在机器上手动安装 kubeadm、kubelet 和 kubectl 这三个二进制文件。当然，kubeadm 的作者已经为各个发行版的 Linux 准备好了安装包，所以你只需要执行：
+
+~~~shell
+$ apt-get install kubeadm
+~~~
+
+### 3.2 Kubeadm init的工作流程
+
+当你执行 kubeadm init 指令后，kubeadm 首先要做的，是一系列的检查工作，以确定这台机器可以用来部署 Kubernetes。这一步检查，我们称为“Preflight Checks”，Check包括：
+
+- Linux 内核的版本必须是否是 3.10 以上？
+- Linux Cgroups 模块是否可用？
+- 机器的 hostname 是否标准？在 Kubernetes 项目里，机器的名字以及一切存储在 Etcd 中的 API 对象，都必须使用标准的 DNS 命名（RFC 1123）。
+- 用户安装的 kubeadm 和 kubelet 的版本是否匹配？
+- 机器上是不是已经安装了 Kubernetes 的二进制文件？
+- Kubernetes 的工作端口 10250/10251/10252 端口是不是已经被占用？
+- ip、mount 等 Linux 指令是否存在？
+- Docker 是否已经安装？
+- ……
+
+在通过了 Preflight Checks 之后，kubeadm 要为你做的，是生成 Kubernetes 对外提供服务所需的各种证书和对应的目录。
 
