@@ -85,6 +85,20 @@ firewall-cmd --list-ports
 
 查看已经开放的端口
 
+Curl 连接Websocket：
+
+~~~shell
+curl --include \
+     --no-buffer \
+     --header "Connection: Upgrade" \
+     --header "Upgrade: websocket" \
+     --header "Host: echo.websocket.org" \
+     --header "Origin: https://echo.websocket.org" \
+     --header "Sec-WebSocket-Key: NVwjmQUcWCenfWu98asDmg==" \
+     --header "Sec-WebSocket-Version: 13" \
+     http://echo.websocket.org
+~~~
+
 
 
 ifconfig 网卡名称 down/up 关闭 启用网卡

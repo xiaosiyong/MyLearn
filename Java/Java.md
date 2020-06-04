@@ -1,6 +1,4 @@
-# Java必备
-
-## 垃圾回收
+## 1、垃圾回收
 
 对象在物理内存空间被划分为两部分，新生代（young generate）和老年代（old generate）
 
@@ -10,7 +8,7 @@
 
 ![gc图](../images/java-gc.png)
 
-## 多线程
+## 2、多线程
 线程是JVM执行任务的最小单元
 
 ###  1、JVM中线程的状态
@@ -111,7 +109,7 @@ JVM 中，具体执行垃圾回收的垃圾回收器有四种:
 
 在主线程执行过程中，Tomcat 的代码还会启动其他一些线程，包括处理 HTTP 请求的线程。而我们开发的应用是一些 class，被 Tomcat 加载到这个 JVM 里执行，所以，即使这里有多个应用被加载，也只是加载了一些 class，我们的应用被加载进来以后，并没有增加 JVM 进程中的线程数，也就是 web 应用本身和线程是没有关系的。而 Tomcat 会根据 HTTP 请求 URL 执行应用中的代码，这个时候，可以理解成每个请求分配一个线程，每个线程执行的都是我们开发的 Web 代码。如果 Web 代码中包含了创建新线程的代码，To
 
-## ConcurrentHashMap
+## 3、ConcurrentHashMap
 
 ### 背景：
 
@@ -437,3 +435,80 @@ boolean containsKey(Object key, int hash) {
 因为在累加count操作过程中，之前累加过的count发生变化的几率非常小，所以ConcurrentHashMap的做法是先尝试2次通过不锁住Segment的方式来统计各个Segment大小，如果统计的过程中，容器的count发生了变化，则再采用加锁的方式来统计所有Segment的大小。
 
 那么ConcurrentHashMap是如何判断在统计的时候容器是否发生了变化呢？使用modCount变量，在put , remove和clean方法里操作元素前都会将变量modCount进行加1，那么在统计size前后比较modCount是否发生变化，从而得知容器的大小是否发生变化。
+
+## 4、CPU、磁盘、内存、网络GC排查
+
+线上故障主要会包括cpu、磁盘、内存以及网络问题，而大多数故障可能会包含不止一个层面的问题，所以进行排查时候尽量四个方面依次排查一遍。同时例如jstack、jmap等工具也是不囿于一个方面的问题的，基本上出问题就是df、free、top 三连，然后依次jstack、jmap伺候。
+
+### 4.1 CPU
+
+导致CPU飙高的原因，通常包括业务逻辑问题（死循环）、频繁GC以及上下文切换过多。而最常见的往往是业务逻辑(或者框架逻辑)导致的，可以使用jstack来分析对应的堆栈情况。我们先用ps命令找到对应进程的pid(如果你有好几个目标进程，可以先用top看一下哪个占用比较高)。
+
+![linuxtopP](../images/linuxtopP.png)
+
+上图中2809，7767较高，接着我们用`top -H -p pid`来找到cpu使用率比较高的一些线程。如下图：
+
+![linuxtopP2](../images/linuxtopP2.png)
+
+然后将占用最高的pid转换为16进制`printf '%x\n' pid`得到nid，接着直接在jstack中找到相应的堆栈信息`jstack pid |grep 'nid' -C5 –color`。
+
+当然更常见的是我们对整个jstack文件进行分析，通常我们会比较关注WAITING和TIMED_WAITING的部分，BLOCKED就不用说了。我们可以使用命令`cat jstack.log | grep "java.lang.Thread.State" | sort -nr | uniq -c`来对jstack的状态有一个整体的把握，如果WAITING之类的特别多，那么多半是有问题啦。
+
+### 4.2 频繁GC
+
+当然我们还是会使用jstack来分析问题，但有时候我们可以先确定下gc是不是太频繁，使用`jstat -gc pid 1000`命令来对gc分代变化情况进行观察，1000表示采样间隔(ms)，S0C/S1C、S0U/S1U、EC/EU、OC/OU、MC/MU分别代表两个Survivor区、Eden区、老年代、元数据区的容量和使用量。YGC/YGT、FGC/FGCT、GCT则代表YoungGc、FullGc的耗时和次数以及总耗时。
+
+![linuxjavagc](../images/linuxjavagc.png)
+
+### 4.3 上下文切换
+
+针对频繁上下文问题，我们可以使用`vmstat` 后加刷新频率，时间秒为单位，命令来进行查看：
+
+![javavmstat](../images/javavmstat.png)
+
+cs(context switch)一列则代表了上下文切换的次数。如果我们希望对特定的pid进行监控那么可以使用 `pidstat -w pid`命令，cswch和nvcswch表示自愿及非自愿切换。
+
+![pidstat](../images/pidstat.png)
+
+### 4.4 磁盘
+
+磁盘空间方面，直接使用df -hl来查看文件系统状态。![linuxdfh](../images/linuxdfh.png)
+
+更多时候，磁盘问题还是性能上的问题。我们可以通过iostat`iostat -d -k -x`来进行分析，最后一列`%util`可以看到每块磁盘写入的程度，而`rrqpm/s`以及`wrqm/s`分别表示读写速度，一般就能帮助定位到具体哪块磁盘出现问题了。
+
+另外我们还需要知道是哪个进程在进行读写，一般来说开发自己心里有数，或者用iotop命令来进行定位文件读写的来源。不过这边拿到的是tid，我们要转换成pid，可以通过readlink来找到pid`readlink -f /proc/*/task/tid/../..`。找到pid之后就可以看这个进程具体的读写情况`cat /proc/pid/io`。我们还可以通过lsof命令来确定具体的文件读写情况`lsof -p pid`
+
+### 4.5 内存
+
+内存问题排查起来相对比CPU麻烦一些，场景也比较多。主要包括OOM、GC问题和堆外内存。一般来讲，我们会先用`free`命令先来检查一发内存的各种情况。
+
+#### 4.5.1堆内内存
+
+内存问题大多还都是堆内内存问题。表象上主要分为OOM和StackOverflow。
+
+OOM
+
+JMV中的内存不足，OOM大致可以分为以下几种：
+
+**Exception in thread "main" java.lang.OutOfMemoryError: unable to create new native thread**这个意思是没有足够的内存空间给线程分配java栈，基本上还是线程池代码写的有问题，比如说忘记shutdown，所以说应该首先从代码层面来寻找问题，使用jstack或者jmap。如果一切都正常，JVM方面可以通过指定`Xss`来减少单个thread stack的大小。另外也可以在系统层面，可以通过修改`/etc/security/limits.conf`nofile和nproc来增大os对线程的限制。
+
+**Exception in thread "main" java.lang.OutOfMemoryError: Java heap space**这个意思是堆的内存占用已经达到-Xmx设置的最大值，应该是最常见的OOM错误了。解决思路仍然是先应该在代码中找，怀疑存在内存泄漏，通过jstack和jmap去定位问题。如果说一切都正常，才需要通过调整`Xmx`的值来扩大内存。
+
+**Caused by: java.lang.OutOfMemoryError: Meta space**这个意思是元数据区的内存占用已经达到`XX:MaxMetaspaceSize`设置的最大值，排查思路和上面的一致，参数方面可以通过`XX:MaxPermSize`来进行调整(这里就不说1.8以前的永久代了)。
+
+Stack Overflow
+
+栈内存溢出，这个大家见到也比较多。**Exception in thread "main" java.lang.StackOverflowError**表示线程栈需要的内存大于Xss值，同样也是先进行排查，参数方面通过`Xss`来调整，但调整的太大可能又会引起OOM。
+
+上述关于OOM和StackOverflow的代码排查方面，我们一般使用JMAP`jmap -dump:format=b,file=filename pid`来导出dump文件。通过mat(Eclipse Memory Analysis Tools)导入dump文件进行分析，内存泄漏问题一般我们直接选Leak Suspects即可，mat给出了内存泄漏的建议。另外也可以选择Top Consumers来查看最大对象报告。和线程相关的问题可以选择thread overview进行分析。
+
+日常开发中，代码产生内存泄漏是比较常见的事，并且比较隐蔽，需要开发者更加关注细节。比如说每次请求都new对象，导致大量重复创建对象；进行文件流操作但未正确关闭；手动不当触发gc；ByteBuffer缓存分配不合理等都会造成代码OOM。
+
+另一方面，我们可以在启动参数中指定`-XX:+HeapDumpOnOutOfMemoryError`来保存OOM时的dump文件。
+
+#### 4.5.2 gc问题和线程
+
+gc问题除了影响cpu也会影响内存，排查思路也是一致的。一般先使用jstat来查看分代变化情况，比如youngGC或者fullGC次数是不是太多呀；EU、OU等指标增长是不是异常呀等。线程的话太多而且不被及时gc也会引发oom，大部分就是之前说的`unable to create new native thread`。除了jstack细细分析dump文件外，我们一般先会看下总体线程，通过`pstree -p pid |wc -l`。
+
+
+
