@@ -1268,7 +1268,30 @@ func (cMap *ConcurrentMap) Store(key, value interface{}) {
 
 #### Sync.Map内部实现
 
+~~~go
+type Map struct {
+    mu Mutex    //互斥锁，用于锁定dirty map
+
+    read atomic.Value //优先读map,支持原子操作，注释中有readOnly不是说read是只读，而是它的结构体。read实际上有写的操作
+
+    dirty map[interface{}]*entry // dirty是一个当前最新的map，允许读写
+
+    misses int // 主要记录read读取不到数据加锁读取read map以及dirty map的次数，当misses等于dirty的长度时，会将dirty复制到read
+}
+~~~
+
 sync.Map内部大量使用了原子操作来存取键和值，并使用了两个原生的map作为存储介质。其中**一个原生map被存在了sync.Map的read字段中，该字段是sync/atomic.Value类型的**。这个原生字典可以被看作一个快照，它总会在条件满足时，重新保存所属的sync.Map值中包含的所有键值对。这个字典不会增减其中的键，但却允许变更其中的键所对应的值。所以，它的只读特性只是对于其中键的集合而言的。
+
+核心思想是用空间换时间，用两个map来存储数据，`read`和`dirty`，`read`支持原子操作，可以看作是`dirty` 的cache，`dirty`是更底层的数据存储层。
+4种操作：读key、增加key、更新key、删除key的基本流程
+读key：先到read中读取，如果有则直接返回结果，如果没有或者是被删除（有特殊value值可以判断），则到dirty加锁中读取，如果有返回结果并更新miss数
+增加key：直接增加到dirty中
+更新key：先到read中看看有没有，如果有直接更新key，如果没有则到dirty中更新
+删除key：先到read中看看有没有，如果有则直接更新为nil，如果没有则到dirty中直接删除
+
+read的替换：当`read`多次都没有命中数据，达到阈值，表示这个cache命中率太低，这时直接将整个`read`用`dirty`替换掉，然后`dirty`又重新置为nil，下一次再添加一个新key的时候，会触发一次`read`到`dirty`的复制，这样二者又保持了一致。虽然`read`和`dirty`有冗余，但这些map的value数据是通过指针指向同一个数据，所以尽管实际的value会很大，但是冗余的空间占用还是有限的。总结，如果对map的读操作远远多于写操作（写操作包括新增和删除key），那么sync.Map是很合适，能够大大提升性能。
+
+
 
 ### 进程、线程、协程的区别于联系
 

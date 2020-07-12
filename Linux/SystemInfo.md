@@ -254,6 +254,10 @@ whoami 查看当前登录用户名
 
  ~/.bash_profile文件 ~/.bashrc
 
+host文件：
+
+/etc/hosts
+
 **5、重启命令：**
 
 1、reboot
