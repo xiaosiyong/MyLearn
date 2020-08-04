@@ -40,6 +40,28 @@ git 有缓冲区的概念，先添加到缓冲区，再提交![gitmanagement](..
 
 ![gitbak](../images/gitbak.png)
 
+### Git checkout所有远程分支到本地：
+
+~~~shell
+git clone xxx
+git branch -r | grep -v '\->' | while read remote; do git branch --track "${remote#origin/}" "$remote"; done
+git fetch --all
+git pull --all
+~~~
+
+bfg工具
+
+~~~shell
+ git clone --mirror git://example.com/some-big-repo.git
+ ## 根据情况的不同, bfg 可选择根据文件大小删除
+java -jar bfg.jar --strip-blobs-bigger-than 100M some-project.git
+## 根据情况的不同, bfg 可选择直接根据名字删除
+java -jar bfg.jar --delete-files name-of-file  some-project.git
+ cd some-big-repo.git
+ git reflog expire --expire=now --all && git gc --prune=now --aggressive
+ git push
+~~~
+
 ### GIthub
 
 git上开源项目的组成部分：

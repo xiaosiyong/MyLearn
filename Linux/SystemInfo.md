@@ -42,7 +42,7 @@ cat filename | tail -n +100 从100行开始显示，显示100行以后的所有�
 
 cat filename | head -n 500 | tail -n +100
 
-
+Mac退出全屏：Command +Control+F
 
 
 查看端口：
