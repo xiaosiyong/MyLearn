@@ -161,3 +161,4 @@ i_13_12_2 -> nil
 对于普通的 Index 来说，不需要唯一性约束，所以我们使用 i + Index ID + age + PK，而 value 为空。因为 PK 一定是唯一的，所以两行数据即使 age 一样，也不会冲突。当我们使用 Index 来查询的时候，会先 seek 到第一个大于等于 i + Index ID + age 这个 key 的数据，然后看前缀是否匹配，如果匹配，则解码出对应的 PK，再从 PK 拿到实际的数据。
 
 TiDB 在操作 TiKV 的时候需要保证操作 keys 的一致性，所以需要使用 TxnKV 模式。
+

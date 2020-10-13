@@ -1780,3 +1780,5 @@ G18: status=2() m=4 lockedm=-1
 | _Psyscall | 2    | 正在执行系统调用。                                           |
 | _Pgcstop  | 3    | 暂停运行，此时系统正在进行 GC，直至 GC 结束后才会转变到下一个状态阶段。 |
 | _Pdead    | 4    | 废弃，不再使用。                                             |
+
+#### [go语言为什么快](https://cloud.tencent.com/developer/article/1594342)

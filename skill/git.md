@@ -49,6 +49,15 @@ git fetch --all
 git pull --all
 ~~~
 
+git rebase 过程中可以使用git --abort/--continue来进行操作，成功之后如何撤销呢？
+
+首先执行git reflog查看本地记录，可知本次rebase之前的id 为：
+02a3260 HEAD@{9}: commit: adjust ds5 ir data save file formate
+
+所以执行
+git reset --hard 02a3260
+即可
+
 bfg工具
 
 ~~~shell
