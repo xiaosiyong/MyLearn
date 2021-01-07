@@ -285,6 +285,103 @@ B+ 树只是加快了索引的检索速度，如何通过索引加快数据库�
 
 很不幸，如果查询条件中含有函数或表达式，则MySQL不会为这列使用索引（虽然某些在数学意义上可以使用）。
 
+#### Explain分析
+
+由于整个过程是基于explain结果分析的，那接下来在了解下explain中的type字段和key_lef字段。
+
+**type字段：联接类型，下面给出各种可能的值，按照从最佳类型到最坏类型进行排序:（重点看ref,rang,index）**
+
+system：表只有一行记录（等于系统表），这是const类型的特例，平时不会出现，可以忽略不计
+const：表示通过索引一次就找到了，const用于比较primary key 或者 unique索引。因为只需匹配一行数据，所有很快。如果将主键置于where列表中，mysql就能将该查询转换为一个const
+eq_ref：唯一性索引扫描，对于每个索引键，表中只有一条记录与之匹配。常见于主键 或 唯一索引扫描。注意：ALL全表扫描的表记录最少的表如t1表
+**ref**：非唯一性索引扫描，返回匹配某个单独值的所有行。本质是也是一种索引访问，它返回所有匹配某个单独值的行，然而他可能会找到多个符合条件的行，所以它应该属于查找和扫描的混合体。
+**range**：只检索给定范围的行，使用一个索引来选择行。key列显示使用了那个索引。一般就是在where语句中出现了bettween、<、>、in等的查询。这种索引列上的范围扫描比全索引扫描要好。只需要开始于某个点，结束于另一个点，不用扫描全部索引。
+**index**：Full Index Scan，index与ALL区别为index类型只遍历索引树。这通常为ALL块，应为索引文件通常比数据文件小。（Index与ALL虽然都是读全表，但index是从索引中读取，而ALL是从硬盘读取）
+ALL：Full Table Scan，遍历全表以找到匹配的行
+
+**Key_lef字段：显示MySQL实际决定使用的索引的长度。如果索引是NULL，则长度为NULL。如果不是NULL，则为使用的索引的长度。所以通过此字段就可推断出使用了那个索引**
+
+计算规则：
+
+　　　　1.定长字段，int占用4个字节，date占用3个字节，char(n)占用n个字符。
+
+​           　2.变长字段varchar(n)，则占用n个字符+两个字节。
+
+　　　　3.不同的字符集，一个字符占用的字节数是不同的。Latin1编码的，一个字符占用一个字节，gdk编码的，一个字符占用两个字节，utf-8编码的，一个字符占用三个字节。
+
+　　　　4.对于所有的索引字段，如果设置为NULL，则还需要1个字节。
+
+Demo：
+
+~~~mysql
+create table staffs (
+id int(10) default null,
+name char(10) default null,
+age int(10) default null,
+key id_name_age (id,name,age)
+)
+~~~
+
+ 该表中对id列.name列.age列建立了一个联合索引 id_name_age_index，实际上相当于建立了三个索引（id）（id_name）（id_name_age）。
+
+~~~mysql
+select * from staffs where id=1 and name="Tony" and age=23;
+select * from staffs where  name="Tony" and id=1  and age=23;
+select * from staffs where  age=23 and id=1 and name="Tony";
+~~~
+
+1、全列匹配查询时，where后面的查询条件，不论是使用（id，age，name）（name，id，age）还是（age，name，id）顺序，在查询时都使用到了联合索引。这是因为MySQL中有查询优化器explain，所以sql语句中字段的顺序不需要和联合索引定义的字段顺序相同，查询优化器会判断纠正这条SQL语句以什么样的顺序执行效率高，最后才能生成真正的执行计划，所以不论以何种顺序都可使用到联合索引。另外通过观察上面三个图中的key_len字段，也可说明在搜索时使用的联合索引中的（id_name_age）索引，因为id为int型，允许null，所以占5个字节，name为char(10)，允许null，又使用的是latin1编码，所以占11个字节，age为int型允许null，所以也占用5个字节，所以该索引长度为21（5+11+5），而上面key_len的值也正好为21，可证明使用的（id_name_age）索引。
+
+2、匹配最左边的列
+
+~~~mysql
+select * from staffs where id=1 and name="Tony" and age=23;
+~~~
+
+![left-rule](../images/left-rule.png)
+
+该搜索是遵循最左匹配原则的，通过key字段也可知，在搜索过程中使用到了联合索引，且使用的是联合索引中的（id）索引，因为key_len字段值为5，而id索引的长度正好为5（因为id为int型，允许null，所以占5个字节）。
+
+![leftidname](../images/leftidname.png)
+
+由于id到name是从左边依次往右边匹配，这两个字段中的值都是有序的，所以也遵循最左匹配原则，通过key字段可知，在搜索过程中也使用到了联合索引，但使用的是联合索引中的（id_name）索引，因为key_len字段值为16，而(id_name)索引的长度正好为16（因为id为int型，允许null，所以占5个字节，name为char(10)，允许null，又使用的是latin1编码，所以占11个字节）
+
+![leftruleidnameage](../images/leftruleidnameage.png)
+
+由于上面三个搜索都是从最左边id依次向右开始匹配的，所以都用到了id_name_age_index联合索引。那如果不是依次匹配呢？
+
+![leftruleidage](../images/leftruleidage.png)
+
+通过key字段可知，在搜索过程中也使用到了联合索引，但使用的是联合索引中的（id）索引，从key_len字段也可知。因为联合索引树是按照id字段创建的，但age相对于id来说是无序的，只有id只有序的，所以他只能使用联合索引中的id索引。
+
+![leftrulename](../images/leftrulename.png)
+
+通过观察发现上面key字段发现在搜索中也使用了id_name_age_index索引，可能许多同学就会疑惑它并没有遵守最左匹配原则，按道理会索引失效，为什么也使用到了联合索引？因为没有从id开始匹配，且name单独来说是无序的，所以它确实不遵循最左匹配原则，然而从type字段可知，它虽然使用了联合索引，但是它是对整个索引树进行了扫描，正好匹配到该索引，与最左匹配原则无关，一般只要是某联合索引的一部分，但又不遵循最左匹配原则时，都可能会采用index类型的方式扫描，但它的效率远不如最做匹配原则的查询效率高，index类型类型的扫描方式是从索引第一个字段一个一个的查找，直到找到符合的某个索引，与all不同的是，index是对所有索引树进行扫描，而all是对整个磁盘的数据进行全表扫描。
+
+![leftruleage](../images/leftruleage.png)
+
+![leftrulenameage](../images/leftrulenameage.png)
+
+这两个结果跟上面的是同样的道理，由于它们都没有从最左边开始匹配，所以没有用到联合索引，使用的都是index全索引扫描。
+
+3、匹配列前缀
+
+　如果id是字符型，那么前缀匹配用的是索引，中坠和后缀用的是全表扫描。
+
+~~~mysql
+select * from staffs where id like 'A%';//前缀都是排好序的，使用的都是联合索引
+select * from staffs where id like '%A%';//全表查询
+select * from staffs where id like '%A';//全表查询
+~~~
+
+4、匹配范围值
+
+![leftrulerange](../images/leftfulerange.png)
+
+5、**准确匹配第一列并范围匹配其他某一列**
+
+![leftrulefirst](../images/leftrulefirst.png)
+
 #### 索引下推
 
 我们还是以市民表的联合索引（name, age）为例。如果现在有一个需求：检索出表中“名字第一个字是张，而且年龄是 10 岁的所有男孩”。那么，SQL 语句是这么写的：
@@ -873,3 +970,4 @@ id name age
 2		李四	25
 ~~~
 
+#### 
