@@ -445,3 +445,69 @@ net.ipv4.tcp_keepalive_intvl = 75
 1、当作为Client时，client每次发起tcp连接请求时，除非绑定端口，通常会让系统选取一个空闲的本地端口（local port），该端口是独占的，不能和其他tcp连接共享。tcp端口的数据类型是unsigned short，因此本地端口个数最大只有65536，端口0有特殊含义，不能使用，这样可用端口最多只有65535，所以在全部作为client端的情况下，一个client最大tcp连接数为65535，这些连接可以连到不同的serverip。
 
 2、当作为Server时，server通常固定在某个本地端口上监听，等待client的连接请求。不考虑地址重用（unix的SO_REUSEADDR选项）的情况下，即使server端有多个ip，本地监听端口也是独占的，因此server端tcp连接4元组中只有remoteip（也就是clientip）和remote port（客户端port）是可变的，因此最大tcp连接为客户端ip数×客户端port数，对IPV4，不考虑ip地址分类等因素，最大tcp连接数约为2的32次方（ip数）×2的16次方（port数），也就是server端单机最大tcp连接数约为2的48次方。
+
+## DNS域名解析过程
+
+- 浏览器会检查缓存中有没有这个域名对应的解析过的IP地址，如果缓存中有，解析过程结束
+- 如果用户的浏览器缓存中没有，浏览器会查找操作系统缓存中是否有这个域名对应的DNS解析结果。
+- 网络配置中会有“DNS服务地址”，如果前两个过程无法解析域名，操作系统会把这个域名发送给这里设置的LDNS，也就是本地区的域名服务区。
+- 如果LDNS仍然没有命中，就直接到Root  server域名服务器请求解析。
+- 根据域名服务器返回给本地域名服务器一个所查询域的主域名服务器（gTLD Server）地址。gTLD是国际顶级域名服务器，如.com，.cn，.org等。
+- 本地域名服务器再向上一步返回的gTLD服务器发送请求。
+- 接受请求的gTLD服务器查找并返回此域名对应的Name Server域名服务器地址，这个Name Server通常就是你注册的域名服务器。
+- Name Server域名服务器会查询存储的域名和IP映射关系表，找到IP记录，连同一个TTL值返回给DNS Server域名服务器。
+- 返回该域名对应的IP和TTL值，Local DNS Server会缓存这个域名和IP的对应关系，缓存时间由TTL值控制。
+- 把解析的结果返回给用户，用户根据TTL值缓存在本地系统缓存中，域名解析过程结束。
+
+Linux以及Windows下都可以通过nslookup命令来查询域名的解析结果：
+
+~~~shell
+xiaosy@localhost ~ % nslookup www.baidu.com
+Server:		192.168.1.1
+Address:	192.168.1.1#53
+
+Non-authoritative answer:
+www.baidu.com	canonical name = www.a.shifen.com.
+Name:	www.a.shifen.com
+Address: 110.242.68.4
+Name:	www.a.shifen.com
+Address: 110.242.68.3
+~~~
+
+Linux系统中还可以使用dig命令来查询DNS的解析过程：还可以增加+trace参数跟踪这个域名的解析过程。
+
+~~~shell
+xiaosy@localhost ~ % dig www.baidu.com printcmd
+
+; <<>> DiG 9.10.6 <<>> www.baidu.com printcmd
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 59920
+;; flags: qr rd ra; QUERY: 1, ANSWER: 3, AUTHORITY: 0, ADDITIONAL: 0
+
+;; QUESTION SECTION:
+;www.baidu.com.			IN	A
+
+;; ANSWER SECTION:
+www.baidu.com.		700	IN	CNAME	www.a.shifen.com.
+www.a.shifen.com.	250	IN	A	110.242.68.3
+www.a.shifen.com.	250	IN	A	110.242.68.4
+
+;; Query time: 79 msec
+;; SERVER: 192.168.1.1#53(192.168.1.1)
+;; WHEN: Sun Mar 14 15:49:24 CST 2021
+;; MSG SIZE  rcvd: 90
+
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 7530
+;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 0, ADDITIONAL: 0
+
+;; QUESTION SECTION:
+;printcmd.			IN	A
+
+;; Query time: 138 msec
+;; SERVER: 192.168.1.1#53(192.168.1.1)
+;; WHEN: Sun Mar 14 15:49:24 CST 2021
+;; MSG SIZE  rcvd: 26
+~~~
+
