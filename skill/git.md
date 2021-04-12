@@ -2,8 +2,8 @@
 
 ### Config 配置用户名和邮箱
 
-1. git congfig --local/global user.name 'DomXiao'
-2. git congfig --local/global user.email 'xiaosywy@163.com'
+1. git config --local/global user.name 'DomXiao'
+2. git config --local/global user.email 'xiaosywy@163.com'
 
 config的作用域![gitconfig](../images/gitconfig.png)
 
