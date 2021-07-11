@@ -1376,3 +1376,248 @@ zsh快捷键
   〈2〉这个算法保证所有客户在有限的时间内得到满足，但实时客户要求快速响应，所以要考虑这个因素。 
 
   〈3〉由于要寻找一个安全序列，实际上增加了系统的开销。
+
+
+
+### 系统监控
+
+1、部分url过滤
+skywalking支持对不需要监控的url进行过滤，使用方法：
+
+config目录下创建apm-trace-ignore-plugin.config文件，如：touch apm-trace-ignore-plugin.config
+把不需要的监控的url配置在trace.ignore_path下，如：echo "trace.ignore_path=/actuator/health,/health,/v1/catalog/services" > apm-trace-ignore-plugin.config
+把ignore plugin jar放到plugins下，cp optional-plugins/apm-trace-ignore-plugin-7.0.0.jar plugins/
+
+2、字段对应
+
+| 页面显示字段 | 对应Skywalking字段                                           |
+| ------------ | ------------------------------------------------------------ |
+| 服务         | 服务                                                         |
+| 健康度       | 错误数*50% + 响应时间*35% + RPM * 15%， 健康度小于X图标变红，大于等于X图标为绿色 |
+|              |                                                              |
+
+​     
+
+
+
+SLT  SLT=SUM(接口的qps*接口平均耗时）/1000 ，即所有接口的总耗时。 Service Avg Throughput（cpm） 与ServiceAvg ResponseTime
+QPS
+
+Service Avg Throughput（cpm）
+响应时间 Service Avg Response Time
+RPM Service Avg Throughput（cpm）
+错误率 oal计算
+Apdex Service Avg ApdexScore
+接口 端点
+Total Service Avg Throughput（cpm）
+Fail 
+isError?
+
+Fail% oal计算
+AVG
+
+Service Avg ResponseTime
+MAX Service Max ResponseTime
+MIN Service Min ResponseTime
+P90 Golbal Response Time
+同比增长率 同比增长率
+
+3、业务线机器关系对应
+接口：http://cmdb.bingex.com/openapi/service-info 可以拿到业务线、服务名、以及ip对应关系，需要维护到自身的存储。
+
+4、Trace数据结构
+segmentId、traceId、serviceId、serviceInstanceId、endpointName、endpointId、startTime、endTime、latency、isError、dataBinary、version
+5、健康度计算
+对于一个服务，我们用健康度来衡量其一段时间之内的健康情况，评分0~100，分值越高，越健康。考量健康度的指标有很多种，这里我们采取其中三个主要的指标，分别为：RPM（Request Per Minute），RT（Response Time），EPM（Error Per Minute）。其中，每分钟错误数，也即EPM占比最大，我们设为50%，响应时间次之，占比35%，剩下为每分钟请求数，占比15%。每个服务可配置具体的分值计算规则，下边以订单服务为例，通过RPM，RT以及EPM计算相应的健康度；
+
+
+周一
+周二
+周三
+周四
+周五
+RPM 150 130 80 180 160
+RT（ms） 100 90 50 110 104
+EPM 3 1 0 4 3
+健康度 100*0.15+99*0.35+100*0.5 = 99.65 
+这里对比数据取的是昨天数据，实际可以根据业务，取上周、去年同一天等数据做平均
+
+|130-150|/150介于0到30%之间所有RPM仍然为100
+
+100*0.15+ （80+(90-50)*(99-80)/(100-50))*0.35+ 100*0.5 =98.32
+
+... ... ...
+假设订单服务，对于RPM分值，计算规则如下：
+
+波动范围
+分值范围
+举例
+0%-30%或者RPM<60
+100 25%->100,4%->100
+31%-70% 70-99 35%->70+(99-70)*(35-31)/(70-31)=72.9
+71%-99% 60-69 80%->60+(69-60)*(80-71)/(99-71) = 62.8
+100%-无穷大 60 60
+假设订单服务RT分值，计算规则如下：
+
+响应时间（ms）
+分值范围
+举例
+0%-5% 100 35->100
+6%-10% 80-99 70->80+(70-50)*(99-80)/(100-50)=87.6
+11%-30% 61-79 同上
+假设订单服务错误数分值，计算规则如下：
+
+每分钟错误数
+分值
+举例
+0%-3% 100 2->100
+4%-6% 71-99 5->85
+7%-10% 60-70 8->62.5
+6、环比，同比
+环比是指当前周期与上一个周期相比，所以环比增长率：（当前值-上一周期值）/上一周期值*100%
+
+举个栗子：
+
+昨天RPM
+今天RMP
+环比增长率
+1500 1800 (1800-1500)/1500*100% =20%
+而同比是指当前周期与去年的同一时间的周期相比，所以同比增长率：（当前值-比较时间段同一时刻的值)/比较时间段同一时刻的值*100%
+
+一月错误数
+去年一月错误数
+同比增长率
+100 120 （100-120)/120*100%=-16.6%
+数据结构梳理
+
+endpoint_avg-20200810
+
+{
+"_index" : "endpoint_avg-20200810",
+"_type" : "_doc",
+"_id" : "202008100008_52",
+"_score" : 1.0,
+"_source" : {
+"service_id" : 18,
+"count" : 4,
+"time_bucket" : 202008100008,
+"service_instance_id" : 24,
+"entity_id" : "52",
+"value" : 3,
+"summation" : 12
+}
+}
+
+endpoint_percentile-20200821
+
+{
+"_index" : "endpoint_percentile-20200821",
+"_type" : "_doc",
+"_id" : "202008210003_51",
+"_score" : 1.0,
+"_source" : {
+"service_id" : 19,
+"precision" : 10,
+"time_bucket" : 202008210003,
+"service_instance_id" : 41,
+"entity_id" : "51",
+"value" : "0,0|1,0|2,0|3,0|4,10",
+"dataset" : "0,15182|1,724|2,24|3,1"
+}
+}
+
+endpoint_max-20200811
+
+{
+"_index" : "endpoint_max-20200811",
+"_type" : "_doc",
+"_id" : "202008110002_47",
+"_score" : 1.0,
+"_source" : {
+"service_id" : 19,
+"time_bucket" : 202008110002,
+"service_instance_id" : 41,
+"entity_id" : "47",
+"value" : 27
+}
+}
+
+endpoint_min-20200809
+
+{
+"_index" : "endpoint_min-20200809",
+"_type" : "_doc",
+"_id" : "202008090638_52",
+"_score" : 1.0,
+"_source" : {
+"service_id" : 18,
+"time_bucket" : 202008090638,
+"service_instance_id" : 24,
+"entity_id" : "52",
+"value" : 2
+}
+}
+
+endpoint_avg-20200817
+
+{
+"_index" : "endpoint_avg-20200817",
+"_type" : "_doc",
+"_id" : "202008170003_34",
+"_score" : 1.0,
+"_source" : {
+"service_id" : 17,
+"count" : 16234,
+"time_bucket" : 202008170003,
+"service_instance_id" : 47,
+"entity_id" : "34",
+"value" : 4,
+"summation" : 66021
+}
+}
+
+service_instance_sla-20200819
+
+{
+"_index" : "service_instance_sla-20200819",
+"_type" : "_doc",
+"_id" : "202008190002_41",
+"_score" : 1.0,
+"_source" : {
+"total" : 40022,
+"service_id" : 19,
+"percentage" : 10000,
+"match" : 40022,
+"time_bucket" : 202008190002,
+"entity_id" : "41"
+}
+}
+
+service_instance_relation_server_percentile-20200813
+
+{
+"_index" : "service_instance_relation_server_percentile-20200813",
+"_type" : "_doc",
+"_id" : "202008131004_46_41",
+"_score" : 1.0,
+"_source" : {
+"dest_service_instance_id" : 41,
+"source_service_id" : 33,
+"dest_service_id" : 19,
+"precision" : 10,
+"time_bucket" : 202008131004,
+"source_service_instance_id" : 46,
+"entity_id" : "46_41",
+"value" : "0,0|1,0|2,0|3,0|4,0",
+"dataset" : "0,2113|1,1|2,1"
+}
+}
+
+
+
+
+
+
+
+
+
