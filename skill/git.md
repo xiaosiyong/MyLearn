@@ -89,3 +89,23 @@ git上开源项目的组成部分：
 3. 还可以附带其他条件  如：**in:name React stars:>5000 forks:>3000**
 4. 同理还可以在 description里，readme里 按以上条件搜 **in:readme React stars:>3000 forks:>3000** ，**in:description 微服务 language:python** 同时还可以带上日期：**in:description 微服务 language:python pushed:>2020-01-01**
 
+### Fork别人分支
+
+1、git remote -v: 
+
+orgin：为本地分支的
+
+upstream：为远程分支
+
+
+2、git remote add upstream <原作者项目的URL>（上一步操作没有upstream，则需要添加uptream）
+
+完成后，执行git remote -v确认与上图一致。
+
+
+
+3、git fetch upstream 将远程分支同步到本地
+
+4、git checkout master 检查本地代码变更
+
+5、git merge upstream/master 合并分支
