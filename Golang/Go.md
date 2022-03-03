@@ -201,7 +201,7 @@ Cancel Context模式
 
 
 
-在main.main函数执行之前所有代码都运行在同一个goroutine，也就是程序的主系统线程中。因此，如果某个init函数内部用go关键字启动了新的goroutine的话，新的goroutine只有在进入main.main函数之后才可能被执行到。
+在main.main函数执行之前所有代码都运行在同一个goroutine，也就是程序的主系统线程中。因此，如果某个init函数内部用go关键字启动了新的goroutine的话，新的goroutine**只有在进入main.main函数之后才可能被执行到**。
 
 ### GO的数组与切片
 
@@ -238,8 +238,6 @@ Actor模型和CSP模型
 二者的格言都是：
 
 Don't communicate by sharing memory，share memory by communicating.
-
-
 
 #### 获取命令行的参数
 
@@ -373,11 +371,11 @@ Go语言切片类型属于引用类型，同属于引用类型的还有**字典�
 
 ~~~go
   slice1 := []int{0,1,2,3,4,5,6}
-  slice3 := []int{7,5}
-  slice1 = append(slice1,slice3...)//一个切片append到另一个切片
 	slice2 := slice1[3:6]
 	fmt.Println("slice2 length:",len(slice2),",slice2 cap:",cap(slice2))
   //输出：slice2 length: 3 ,slice2 cap: 4
+  slice3 := []int{7,5}
+  slice1 = append(slice1,slice3...)//一个切片append到另一个切片
 	s1 := make([]int, 5)
 	s2 := make([]int, 5,8)
 ~~~
@@ -391,7 +389,7 @@ var x []int
 	//x := []int{}
 	x = append(x, 0)
 	x = append(x, 1)
-	x = append(x, 2)
+	x = append(x, 2) //此时x的len是3  cap是4，所以append3的时候不会扩容所以y的底层还是x切片，所以append4的时候会影响原来的值
 	y := append(x, 3)
 	z := append(x, 4)
 	fmt.Println(y, z)
