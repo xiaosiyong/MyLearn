@@ -1615,7 +1615,9 @@ service_instance_relation_server_percentile-20200813
 
 
 
+### xclient下载软件无法打开
 
+sudo xattr -d com.apple.quarantine /Applications/xmind.app
 
 
 
