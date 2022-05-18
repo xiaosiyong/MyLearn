@@ -1619,7 +1619,9 @@ service_instance_relation_server_percentile-20200813
 
 sudo xattr -d com.apple.quarantine /Applications/xmind.app
 
+Jetbrains系列卸载后无法打开：
 
+打开终端依次执行下列命令	有的文件可能存在JetBrains文件夹里面，需要进到JetBrains才能rm掉cd ~/Library/Preferences/           rm -rf PyCharm2019.2/         cd ~/Library/Logsrm -rf PyCharm2019.2/cd ~/Library/App
 
 
 
