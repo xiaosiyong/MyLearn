@@ -104,7 +104,7 @@ upstream：为远程分支
 
 
 
-3、git fetch upstream 将远程分支同步到本地
+3、git fetch upstream 将远程分支同步到本地clear
 
 4、git checkout master 检查本地代码变更
 
