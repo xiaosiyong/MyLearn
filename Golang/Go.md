@@ -264,6 +264,51 @@ Actor模型和CSP模型
 
 每次const出现时，都会让iota的值初始化成0。一行中有两个及以上的iota时，在下一行增长，而不是立即取得它的引用，比如 const(A，B = iota+1，iota+2)两个iota的值是一样的
 
+### 并发访问切片
+
+~~~go
+type User struct {
+  Name string 
+  Age int32
+}
+var users []*User
+for i:=0;i<1000;i++ {
+  users=append(users,&User{
+    Age :i,
+    Name:fmt.Sprintf("%d",i*i)
+  })
+}
+
+//并发遍历
+for i,user := range users {
+  go func(){
+    fmt.Println(user.Age)
+  }()
+}
+//以上会存在问题，因为循环里的goroutine访问到的user 可能会是乱序的
+//可以按照下述方式通过索引下标来操作
+for i,user := range users {
+  go func(index int){
+    fmt.Println(users[index].Age)
+  }(i)
+}
+
+//另外一个问题时等待Goroutine执行完，有两种方式，一种是通过sync.WaitGroup{},另外是通过channel。
+//Demo如下
+ch := make(chan struct{})
+for i,user := range users {
+  go func(index int){
+    fmt.Println(users[index].Age)
+    ch<-struct{}{}
+  }(i)
+}
+//因为知道users的长度，所以ch里的数量跟users一致，只需遍历users即可
+for range users {
+  <-ch 
+}
+
+~~~
+
 #### CSP（Communicating Sequential Processes）模型与Actor模型
 
 二者的格言都是：
