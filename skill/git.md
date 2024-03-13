@@ -5,7 +5,7 @@
 1. git config --local/global user.name 'DomXiao'
 2. git config --local/global user.email 'xiaosywy@163.com'
 
-config的作用域![gitconfig](../images/gitconfig.png)
+config的作用域[gitconfig](../images/gitconfig.png)
 
 ### 两种方式新建git项目
 
